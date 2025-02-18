@@ -21,12 +21,22 @@ impl SinglePing {
     }
 
     pub fn ping_v4(&self, addr: net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+        #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET,
+            #[cfg(feature = "DGRAM_SOCKET")]
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMP),
         )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        #[cfg(not(feature = "DGRAM_SOCKET"))]
+        let sock = net::socket(
+            net::AddressFamily::INET,
+            #[cfg(not(feature = "DGRAM_SOCKET"))]
+            net::SocketType::RAW,
+            Some(net::ipproto::ICMP),
+        )
+            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
@@ -50,12 +60,22 @@ impl SinglePing {
     }
 
     pub fn ping_v6(&self, addr: net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
+        #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET6,
+            #[cfg(feature = "DGRAM_SOCKET")]
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMPV6),
         )
         .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        #[cfg(not(feature = "DGRAM_SOCKET"))]
+        let sock = net::socket(
+            net::AddressFamily::INET6,
+            #[cfg(not(feature = "DGRAM_SOCKET"))]
+            net::SocketType::RAW,
+            Some(net::ipproto::ICMPV6),
+        )
+            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
@@ -86,6 +106,7 @@ impl SinglePing {
 fn solve_recv_error(error: rustix::io::Errno) -> PingError {
     match error.to_owned().raw_os_error() {
         11 => SharedError::Timeout.into(),
+        101 => SharedError::Unreachable.into(),
         _ => LinuxError::RecvFailed(error.to_string()).into(),
     }
 }
