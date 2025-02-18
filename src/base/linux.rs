@@ -1,4 +1,4 @@
-use crate::base::error::PingError;
+use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use rustix::net;
 
@@ -45,7 +45,7 @@ impl SinglePing {
         
         let mut buff = [0_u8; 20];
         net::recv(&sock, &mut buff, net::RecvFlags::empty())
-            .map_err(|e| LinuxError::RecvFailed(e.to_string()))?;
+            .map_err(|e| solve_recv_error(e))?;
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
@@ -75,9 +75,16 @@ impl SinglePing {
 
         let mut buff = [0_u8; 20];
         net::recv(&sock, &mut buff, net::RecvFlags::empty())
-            .map_err(|e| LinuxError::RecvFailed(e.to_string()))?;
+            .map_err(|e| solve_recv_error(e))?;
 
         Ok(std::time::Instant::now().duration_since(start_time))
+    }
+}
+
+fn solve_recv_error(error: rustix::io::Errno) -> PingError {
+    match error.to_owned().raw_os_error() {
+        11 => SharedError::Timeout.into(),
+        _ => LinuxError::RecvFailed(error.to_string()).into(),
     }
 }
 
