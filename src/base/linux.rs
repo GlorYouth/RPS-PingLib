@@ -39,13 +39,12 @@ impl SinglePing {
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
-        
+
         net::send(&sock, PingICMP::new(8).as_slice(), net::SendFlags::empty())
             .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
-        
+
         let mut buff = [0_u8; 20];
-        net::recv(&sock, &mut buff, net::RecvFlags::empty())
-            .map_err(|e| solve_recv_error(e))?;
+        net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
@@ -56,26 +55,29 @@ impl SinglePing {
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMPV6),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
             Some(std::time::Duration::from_millis(self.timeout.into())),
         )
-            .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+        .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
 
         net::connect_v6(&sock, &net::SocketAddrV6::new(addr, 0, 0, 0))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
 
-        net::send(&sock, PingICMP::new(128).as_slice(), net::SendFlags::empty())
-            .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
+        net::send(
+            &sock,
+            PingICMP::new(128).as_slice(),
+            net::SendFlags::empty(),
+        )
+        .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
 
         let mut buff = [0_u8; 20];
-        net::recv(&sock, &mut buff, net::RecvFlags::empty())
-            .map_err(|e| solve_recv_error(e))?;
+        net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }

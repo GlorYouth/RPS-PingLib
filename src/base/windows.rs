@@ -1,8 +1,8 @@
+use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
-use crate::base::error::{PingError, SharedError};
 
 pub enum WindowsError {
     IcmpCreateFileError(String),
@@ -74,8 +74,9 @@ impl SinglePing {
                 reply_buffer.len() as _,
                 self.timeout,
             );
-            
-            IpHelper::IcmpCloseHandle(handler).map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+
+            IpHelper::IcmpCloseHandle(handler)
+                .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
 
             if reply_count != 0 {
                 Ok(std::time::Instant::now().duration_since(start_time))
@@ -135,13 +136,14 @@ impl SinglePing {
                 self.timeout,
             );
 
-            IpHelper::IcmpCloseHandle(handler).map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+            IpHelper::IcmpCloseHandle(handler)
+                .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
 
             if reply_count != 0 {
                 Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-               Err(solve_recv_error(error))
+                Err(solve_recv_error(error))
             }
         }
     }
@@ -174,18 +176,12 @@ impl SinglePing {
 
 fn solve_recv_error(error: WIN32_ERROR) -> PingError {
     match error {
-        WIN32_ERROR(11010) => {
-            SharedError::Timeout.into()
-        }
-        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE => {
-            SharedError::Unreachable.into()
-        }
+        WIN32_ERROR(11010) => SharedError::Timeout.into(),
+        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE => SharedError::Unreachable.into(),
         windows::Win32::Foundation::ERROR_INVALID_PARAMETER => {
             WindowsError::InvalidParameter.into()
         }
-        WIN32_ERROR(_) => {
-            WindowsError::UnknownError(error.0).into()
-        }
+        WIN32_ERROR(_) => WindowsError::UnknownError(error.0).into(),
     }
 }
 
