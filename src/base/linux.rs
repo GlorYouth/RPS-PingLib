@@ -28,7 +28,7 @@ impl SinglePing {
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMP),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
         #[cfg(not(feature = "DGRAM_SOCKET"))]
         let sock = net::socket(
             net::AddressFamily::INET,
@@ -36,7 +36,7 @@ impl SinglePing {
             net::SocketType::RAW,
             Some(net::ipproto::ICMP),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
@@ -75,7 +75,7 @@ impl SinglePing {
             net::SocketType::RAW,
             Some(net::ipproto::ICMPV6),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,

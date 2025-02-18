@@ -109,7 +109,7 @@ impl std::fmt::Display for PingError {
 
 pub enum SharedError {
     Timeout,
-    Unreachable, // todo linux unreachable
+    Unreachable,
 }
 
 impl From<SharedError> for PingError {
