@@ -4,16 +4,16 @@ use windows::Win32::Foundation::GetLastError;
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
 
-pub enum PingError {
+pub enum WindowsError {
     IcmpCreateFileError,
     UnknownError(u32),
 }
 
-impl Debug for PingError {
+impl Debug for WindowsError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            PingError::UnknownError(x) => write!(f, "Unknown Ping Error: {}", x),
-            PingError::IcmpCreateFileError => write!(f, "Icmp Create File Error"),
+            WindowsError::UnknownError(x) => write!(f, "Unknown Ping Error: {}", x),
+            WindowsError::IcmpCreateFileError => write!(f, "Icmp Create File Error"),
         }
     }
 }
@@ -42,6 +42,7 @@ impl Default for SinglePing {
 }
 
 impl SinglePing {
+    #[inline]
     pub fn new(timeout: u32) -> Self {
         Self {
             event: None,
@@ -52,11 +53,11 @@ impl SinglePing {
         }
     }
 
-    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<u128, PingError> {
+    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<std::time::Duration, WindowsError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(PingError::IcmpCreateFileError),
+                Err(_e) => return Err(WindowsError::IcmpCreateFileError),
             };
             let des = addr.to_bits();
             let request_data: u128 = rand::rng().random();
@@ -82,20 +83,19 @@ impl SinglePing {
             );
 
             if reply_count != 0 {
-                let time = std::time::Instant::now().duration_since(start_time);
-                Ok(time.as_micros())
+                Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(PingError::UnknownError(error.0))
+                Err(WindowsError::UnknownError(error.0))
             }
         }
     }
 
-    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<u128, PingError> {
+    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<std::time::Duration, WindowsError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(PingError::IcmpCreateFileError),
+                Err(_e) => return Err(WindowsError::IcmpCreateFileError),
             };
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
@@ -141,11 +141,10 @@ impl SinglePing {
             );
 
             if reply_count != 0 {
-                let time = std::time::Instant::now().duration_since(start_time);
-                Ok(time.as_micros())
+                Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(PingError::UnknownError(error.0))
+                Err(WindowsError::UnknownError(error.0))
             }
         }
     }
@@ -186,7 +185,8 @@ mod tests {
         println!(
             "{} ms",
             ping.ping_v4(std::net::Ipv4Addr::new(1, 1, 1, 1))
-                .expect("ping_v4 error") as f64
+                .expect("ping_v4 error")
+                .as_micros() as f64
                 / 1000.0
         );
     }
@@ -197,7 +197,8 @@ mod tests {
         println!(
             "{} ms",
             ping.ping_v6("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
-                .expect("ping_v6 error") as f64
+                .expect("ping_v6 error")
+                .as_micros() as f64
                 / 1000.0
         );
     }
