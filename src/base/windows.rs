@@ -1,5 +1,4 @@
 use rand::Rng;
-use std::fmt::{Debug, Formatter};
 use windows::Win32::Foundation::GetLastError;
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
@@ -8,15 +7,6 @@ use crate::base::error::PingError;
 pub enum WindowsError {
     IcmpCreateFileError,
     UnknownError(u32),
-}
-
-impl Debug for WindowsError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            WindowsError::UnknownError(x) => write!(f, "Unknown Ping Error: {}", x),
-            WindowsError::IcmpCreateFileError => write!(f, "Icmp Create File Error"),
-        }
-    }
 }
 
 pub struct SinglePing {
