@@ -1,11 +1,12 @@
 use rand::Rng;
-use windows::Win32::Foundation::GetLastError;
+use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
-use crate::base::error::PingError;
+use crate::base::error::{PingError, SharedError};
 
 pub enum WindowsError {
     IcmpCreateFileError,
+    InvalidParameter, //maybe reply_buffer too small
     UnknownError(u32),
 }
 
@@ -77,7 +78,7 @@ impl SinglePing {
                 Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(WindowsError::UnknownError(error.0).into())
+                Err(solve_recv_error(error))
             }
         }
     }
@@ -135,7 +136,7 @@ impl SinglePing {
                 Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(WindowsError::UnknownError(error.0).into())
+               Err(solve_recv_error(error))
             }
         }
     }
@@ -166,6 +167,23 @@ impl SinglePing {
     }
 }
 
+fn solve_recv_error(error: WIN32_ERROR) -> PingError {
+    match error {
+        WIN32_ERROR(11010) => {
+            SharedError::Timeout.into()
+        }
+        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE => {
+            SharedError::Unreachable.into()
+        }
+        windows::Win32::Foundation::ERROR_INVALID_PARAMETER => {
+            WindowsError::InvalidParameter.into()
+        }
+        WIN32_ERROR(_) => {
+            WindowsError::UnknownError(error.0).into()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::base::windows::SinglePing;
@@ -175,7 +193,7 @@ mod tests {
         let ping = SinglePing::default();
         println!(
             "{} ms",
-            ping.ping_v4(std::net::Ipv4Addr::new(1, 1, 1, 1))
+            ping.ping_v4(std::net::Ipv4Addr::new(199, 16, 158, 8))
                 .expect("ping_v4 error")
                 .as_micros() as f64
                 / 1000.0

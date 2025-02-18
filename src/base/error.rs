@@ -30,6 +30,9 @@ impl std::fmt::Debug for PingError {
                     WindowsError::IcmpCreateFileError => {
                         write!(f, "PingError::WindowsError(IcmpCreateFileError)")
                     }
+                    WindowsError::InvalidParameter => {
+                        write!(f, "PingError::InvalidParameter")
+                    }
                     WindowsError::UnknownError(i) => {
                         write!(f, "PingError::WindowsError(UnknownError({}))", i)
                     }
@@ -77,6 +80,9 @@ impl std::fmt::Display for PingError {
                 match e {
                     WindowsError::IcmpCreateFileError => {
                         write!(f, "icmp create file error")
+                    }
+                    WindowsError::InvalidParameter => {
+                        write!(f, "invalid parameter")
                     }
                     WindowsError::UnknownError(i) => {
                         write!(f, "Windows Unknown Error: {}", i)
