@@ -1,9 +1,12 @@
+#[cfg(not(target_os = "windows"))]
 use crate::base::linux::LinuxError;
+#[cfg(target_os = "windows")]
+use crate::base::windows::WindowsError;
 
 pub enum PingError {
     SharedError(SharedError),
     #[cfg(target_os = "windows")]
-    WindowsError,
+    WindowsError(WindowsError),
     #[cfg(not(target_os = "windows"))]
     LinuxError(LinuxError),
 }
@@ -22,7 +25,16 @@ impl std::fmt::Debug for PingError {
                 }
             }
             #[cfg(target_os = "windows")]
-            PingError::WindowsError => {}
+            PingError::WindowsError(e) => {
+                match e {
+                    WindowsError::IcmpCreateFileError => {
+                        write!(f, "PingError::WindowsError(IcmpCreateFileError)")
+                    }
+                    WindowsError::UnknownError(i) => {
+                        write!(f, "PingError::WindowsError(UnknownError({}))", i)
+                    }
+                }
+            }
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => {
                 match e {
@@ -53,15 +65,24 @@ impl std::fmt::Display for PingError {
             PingError::SharedError(e) => {
                 match e {
                     SharedError::Timeout => {
-                        write!(f, "Ping timeout")
+                        write!(f, "ping timeout")
                     }
                     SharedError::Unreachable => {
-                        write!(f, "Ping unreachable")
+                        write!(f, "ping unreachable")
                     }
                 }
             }
             #[cfg(target_os = "windows")]
-            PingError::WindowsError => {}
+            PingError::WindowsError(e) => {
+                match e {
+                    WindowsError::IcmpCreateFileError => {
+                        write!(f, "icmp create file error")
+                    }
+                    WindowsError::UnknownError(i) => {
+                        write!(f, "Windows Unknown Error: {}", i)
+                    }
+                }
+            }
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => {
                 match e {
@@ -97,8 +118,16 @@ impl From<SharedError> for PingError {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 impl From<LinuxError> for PingError {
     fn from(error: LinuxError) -> Self {
         Self::LinuxError(error)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl From<WindowsError> for PingError {
+    fn from(error: WindowsError) -> Self {
+        Self::WindowsError(error)
     }
 }

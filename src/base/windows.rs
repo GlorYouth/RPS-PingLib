@@ -3,6 +3,7 @@ use std::fmt::{Debug, Formatter};
 use windows::Win32::Foundation::GetLastError;
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
+use crate::base::error::PingError;
 
 pub enum WindowsError {
     IcmpCreateFileError,
@@ -53,11 +54,11 @@ impl SinglePing {
         }
     }
 
-    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<std::time::Duration, WindowsError> {
+    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(WindowsError::IcmpCreateFileError),
+                Err(_e) => return Err(WindowsError::IcmpCreateFileError.into()),
             };
             let des = addr.to_bits();
             let request_data: u128 = rand::rng().random();
@@ -86,16 +87,16 @@ impl SinglePing {
                 Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(WindowsError::UnknownError(error.0))
+                Err(WindowsError::UnknownError(error.0).into())
             }
         }
     }
 
-    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<std::time::Duration, WindowsError> {
+    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(WindowsError::IcmpCreateFileError),
+                Err(_e) => return Err(WindowsError::IcmpCreateFileError.into()),
             };
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
@@ -144,7 +145,7 @@ impl SinglePing {
                 Ok(std::time::Instant::now().duration_since(start_time))
             } else {
                 let error = GetLastError();
-                Err(WindowsError::UnknownError(error.0))
+                Err(WindowsError::UnknownError(error.0).into())
             }
         }
     }
