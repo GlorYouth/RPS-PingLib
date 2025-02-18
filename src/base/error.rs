@@ -27,8 +27,11 @@ impl std::fmt::Debug for PingError {
             #[cfg(target_os = "windows")]
             PingError::WindowsError(e) => {
                 match e {
-                    WindowsError::IcmpCreateFileError => {
-                        write!(f, "PingError::WindowsError(IcmpCreateFileError)")
+                    WindowsError::IcmpCreateFileError(str) => {
+                        write!(f, "PingError::WindowsError(IcmpCreateFileError): {}",str)
+                    }
+                    WindowsError::IcmpCloseFileError(str) => {
+                        write!(f, "PingError::WindowsError(IcmpCloseFileError): {}",str)
                     }
                     WindowsError::InvalidParameter => {
                         write!(f, "PingError::InvalidParameter")
@@ -78,8 +81,11 @@ impl std::fmt::Display for PingError {
             #[cfg(target_os = "windows")]
             PingError::WindowsError(e) => {
                 match e {
-                    WindowsError::IcmpCreateFileError => {
-                        write!(f, "icmp create file error")
+                    WindowsError::IcmpCreateFileError(str) => {
+                        write!(f, "icmp create file error: {}",str)
+                    }
+                    WindowsError::IcmpCloseFileError(str) => {
+                        write!(f, "icmp close file error: {}",str)
                     }
                     WindowsError::InvalidParameter => {
                         write!(f, "invalid parameter")

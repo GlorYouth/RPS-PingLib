@@ -5,7 +5,8 @@ use windows::Win32::Networking::WinSock;
 use crate::base::error::{PingError, SharedError};
 
 pub enum WindowsError {
-    IcmpCreateFileError,
+    IcmpCreateFileError(String),
+    IcmpCloseFileError(String),
     InvalidParameter, //maybe reply_buffer too small
     UnknownError(u32),
 }
@@ -49,7 +50,7 @@ impl SinglePing {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(WindowsError::IcmpCreateFileError.into()),
+                Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let des = addr.to_bits();
             let request_data: u128 = rand::rng().random();
@@ -73,6 +74,8 @@ impl SinglePing {
                 reply_buffer.len() as _,
                 self.timeout,
             );
+            
+            IpHelper::IcmpCloseHandle(handler).map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
 
             if reply_count != 0 {
                 Ok(std::time::Instant::now().duration_since(start_time))
@@ -87,7 +90,7 @@ impl SinglePing {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
-                Err(_e) => return Err(WindowsError::IcmpCreateFileError.into()),
+                Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
@@ -131,6 +134,8 @@ impl SinglePing {
                 reply_buffer.len() as _,
                 self.timeout,
             );
+
+            IpHelper::IcmpCloseHandle(handler).map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
 
             if reply_count != 0 {
                 Ok(std::time::Instant::now().duration_since(start_time))
