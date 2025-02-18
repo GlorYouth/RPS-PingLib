@@ -1,8 +1,8 @@
-use std::fmt::{Debug, Formatter};
 use rand::Rng;
+use std::fmt::{Debug, Formatter};
 use windows::Win32::Foundation::GetLastError;
 use windows::Win32::NetworkManagement::IpHelper;
-use windows::Win32::Networking::WinSock as WinSock;
+use windows::Win32::Networking::WinSock;
 
 pub enum PingError {
     IcmpCreateFileError,
@@ -26,7 +26,6 @@ pub struct SinglePing {
     // if you want to use above variables, please read
     // https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho2 for ipv4
     // https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmp6sendecho2 for ipv6
-
     timeout: u32, //ms
 }
 
@@ -53,17 +52,18 @@ impl SinglePing {
         }
     }
 
-    pub fn ping_v4(&self,addr: std::net::Ipv4Addr) -> Result<u128,PingError> {
+    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<u128, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
-                Ok(v)  => v,
+                Ok(v) => v,
                 Err(_e) => return Err(PingError::IcmpCreateFileError),
             };
             let des = addr.to_bits();
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
-            const REPLY_BUFFER_SIZE: usize = size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
+            const REPLY_BUFFER_SIZE: usize =
+                size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
 
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
@@ -82,7 +82,7 @@ impl SinglePing {
             );
 
             if reply_count != 0 {
-                let time =  std::time::Instant::now().duration_since(start_time);
+                let time = std::time::Instant::now().duration_since(start_time);
                 Ok(time.as_micros())
             } else {
                 let error = GetLastError();
@@ -91,16 +91,17 @@ impl SinglePing {
         }
     }
 
-    pub fn ping_v6(&self,addr: std::net::Ipv6Addr) -> Result<u128,PingError> {
+    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<u128, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
-                Ok(v)  => v,
+                Ok(v) => v,
                 Err(_e) => return Err(PingError::IcmpCreateFileError),
             };
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
-            const REPLY_BUFFER_SIZE: usize = size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
+            const REPLY_BUFFER_SIZE: usize =
+                size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
 
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
@@ -140,7 +141,7 @@ impl SinglePing {
             );
 
             if reply_count != 0 {
-                let time =  std::time::Instant::now().duration_since(start_time);
+                let time = std::time::Instant::now().duration_since(start_time);
                 Ok(time.as_micros())
             } else {
                 let error = GetLastError();
@@ -150,44 +151,54 @@ impl SinglePing {
     }
 
     #[inline]
-    pub fn set_event(&mut self,event:windows::Win32::Foundation::HANDLE) {
+    pub fn set_event(&mut self, event: windows::Win32::Foundation::HANDLE) {
         self.event = Some(event)
     }
 
     #[inline]
-    pub fn set_apc_routine(&mut self,apc_routine:windows::Win32::System::IO::PIO_APC_ROUTINE) {
+    pub fn set_apc_routine(&mut self, apc_routine: windows::Win32::System::IO::PIO_APC_ROUTINE) {
         self.apc_routine = Some(apc_routine)
     }
 
     #[inline]
-    pub fn set_apc_context(&mut self,apc_context:*const core::ffi::c_void) {
+    pub fn set_apc_context(&mut self, apc_context: *const core::ffi::c_void) {
         self.apc_context = Some(apc_context)
     }
 
     #[inline]
-    pub fn set_request_option(&mut self,request_option:*const IpHelper::IP_OPTION_INFORMATION) {
+    pub fn set_request_option(&mut self, request_option: *const IpHelper::IP_OPTION_INFORMATION) {
         self.request_option = Some(request_option)
     }
 
     #[inline]
-    pub fn set_timeout(&mut self,timeout:u32) {
+    pub fn set_timeout(&mut self, timeout: u32) {
         self.timeout = timeout
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::base::ping::SinglePing;
+    use crate::base::windows::SinglePing;
 
     #[test]
     fn test_ping_v4() {
         let ping = SinglePing::default();
-        println!("{} ms",ping.ping_v4(std::net::Ipv4Addr::new(1,1,1,1)).expect("ping_v4 error") as f64 / 1000.0);
+        println!(
+            "{} ms",
+            ping.ping_v4(std::net::Ipv4Addr::new(1, 1, 1, 1))
+                .expect("ping_v4 error") as f64
+                / 1000.0
+        );
     }
 
     #[test]
     fn test_ping_v6() {
         let ping = SinglePing::default();
-        println!("{} ms",ping.ping_v6("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap()).expect("ping_v6 error") as f64 / 1000.0);
+        println!(
+            "{} ms",
+            ping.ping_v6("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
+                .expect("ping_v6 error") as f64
+                / 1000.0
+        );
     }
 }
