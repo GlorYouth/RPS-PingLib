@@ -153,7 +153,7 @@ impl PingV6 {
             let bind_addr = match self.builder.bind_addr {
                 None => {std::mem::zeroed()}
                 Some(addr) => {
-                    addr.into()
+                    std::mem::transmute(target)
                 }
             };
 
@@ -217,7 +217,7 @@ impl PingV6 {
                             sin6_flowinfo: 0,
                             sin6_addr: WinSock::IN6_ADDR {
                                 u: WinSock::IN6_ADDR_0 {
-                                    Byte: target.into(),
+                                    Byte: std::mem::transmute(target),
                                 },
                             },
                             Anonymous: Default::default(),
