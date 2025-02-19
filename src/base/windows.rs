@@ -2,15 +2,19 @@ use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::base::utils::UnMut;
 use rand::Rng;
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
 use windows::Win32::NetworkManagement::IpHelper;
-use windows::Win32::NetworkManagement::IpHelper::{IP_OPTION_INFORMATION, IP_OPTION_INFORMATION32};
+#[cfg(target_pointer_width = "64")]
+use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
+#[cfg(target_pointer_width = "32")]
+use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32;
 use windows::Win32::Networking::WinSock;
 
 pub enum WindowsError {
     IcmpCreateFileError(String),
     IcmpCloseFileError(String),
+    IcmpParseRepliesError(u32),
     InvalidParameter, //maybe reply_buffer too small
     UnknownError(u32),
 }
@@ -61,7 +65,13 @@ impl PingV4 {
         }
     }
 
-    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+    const REPLY_BUFFER_SIZE: usize = size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
+
+    fn get_reply(
+        &self,
+        target: std::net::Ipv4Addr,
+        buf: &mut [u8; Self::REPLY_BUFFER_SIZE],
+    ) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
@@ -71,15 +81,10 @@ impl PingV4 {
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
-            const REPLY_BUFFER_SIZE: usize =
-                size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
-
             let request_options = match &self.info {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
-
-            let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
             let reply_count = match &self.builder.window_addition {
                 // window_addition 确定第2-4项参数
@@ -94,8 +99,8 @@ impl PingV4 {
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
                         request_options,
-                        reply_buffer.as_ptr() as *mut _,
-                        reply_buffer.len() as _,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
                         self.builder.timeout,
                     ),
                     Some(addr) => IpHelper::IcmpSendEcho2Ex(
@@ -108,8 +113,8 @@ impl PingV4 {
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
                         request_options,
-                        reply_buffer.as_ptr() as *mut _,
-                        reply_buffer.len() as _,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
                         self.builder.timeout,
                     ),
                 },
@@ -123,8 +128,8 @@ impl PingV4 {
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
                         request_options,
-                        reply_buffer.as_ptr() as *mut _,
-                        reply_buffer.len() as _,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
                         self.builder.timeout,
                     ),
                     Some(addr) => IpHelper::IcmpSendEcho2Ex(
@@ -137,25 +142,59 @@ impl PingV4 {
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
                         request_options,
-                        reply_buffer.as_ptr() as *mut _,
-                        reply_buffer.len() as _,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
                         self.builder.timeout,
                     ),
                 },
             };
 
-            IpHelper::IcmpCloseHandle(handler)
-                .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+            if reply_count == 0 {
+                let error = GetLastError();
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                return Err(solve_recv_error(error));
+            }
 
-            if reply_count != 0 {
-                Ok(std::time::Instant::now().duration_since(start_time))
+            let reply_time = std::time::Instant::now().duration_since(start_time);
+
+            let parse_error = IpHelper::IcmpParseReplies(buf.as_ptr() as *mut _, reply_count);
+
+            if parse_error == 0 {
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Ok(reply_time)
             } else {
                 let error = GetLastError();
-                Err(solve_recv_error(error))
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Err(WindowsError::IcmpParseRepliesError(error.0).into())
             }
         }
     }
+
+    #[inline]
+    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+        let mut buf = [0u8; Self::REPLY_BUFFER_SIZE];
+        self.get_reply(target, &mut buf)
+    }
+    #[inline]
+    pub fn ping_in_detail(&self, target: std::net::Ipv4Addr) -> Result<PingV4Result, PingError> {
+        let mut buf = [0u8; Self::REPLY_BUFFER_SIZE];
+        let duration = self.get_reply(target, &mut buf)?;
+        Ok(PingV4Result {
+            ip: std::net::Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]),
+            duration,
+        })
+    }
 }
+
+#[derive(Debug)]
+pub struct PingV4Result {
+    pub ip: std::net::Ipv4Addr,
+    pub duration: std::time::Duration,
+}
+
 
 impl PingV6 {
     #[inline]
@@ -187,7 +226,14 @@ impl PingV6 {
         }
     }
 
-    pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
+    const REPLY_BUFFER_SIZE: usize =
+        size_of::<IpHelper::ICMPV6_ECHO_REPLY_LH>() + size_of::<u128>() + 8;
+
+    fn get_reply(
+        &self,
+        target: std::net::Ipv6Addr,
+        buf: &mut [u8; Self::REPLY_BUFFER_SIZE],
+    ) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
@@ -196,15 +242,10 @@ impl PingV6 {
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
-            const REPLY_BUFFER_SIZE: usize =
-                size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
-
             let request_options = match &self.info {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
-
-            let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
             let bind_addr = match self.builder.bind_addr {
                 None => std::mem::zeroed(),
@@ -246,8 +287,8 @@ impl PingV6 {
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of_val(&request_data) as _,
                     request_options,
-                    reply_buffer.as_ptr() as *mut _,
-                    reply_buffer.len() as _,
+                    buf.as_ptr() as *mut _,
+                    buf.len() as _,
                     self.builder.timeout,
                 ),
                 Some(addition) => IpHelper::Icmp6SendEcho2(
@@ -284,23 +325,57 @@ impl PingV6 {
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of_val(&request_data) as _,
                     request_options,
-                    reply_buffer.as_ptr() as *mut _,
-                    reply_buffer.len() as _,
+                    buf.as_ptr() as *mut _,
+                    buf.len() as _,
                     self.builder.timeout,
                 ),
             };
 
-            IpHelper::IcmpCloseHandle(handler)
-                .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+            if reply_count == 0 {
+                let error = GetLastError();
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                return Err(solve_recv_error(error));
+            }
 
-            if reply_count != 0 {
-                Ok(std::time::Instant::now().duration_since(start_time))
+            let reply_time = std::time::Instant::now().duration_since(start_time);
+
+            let parse_error = IpHelper::Icmp6ParseReplies(buf.as_ptr() as *mut _, reply_count);
+
+            if parse_error == 1 {
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Ok(reply_time)
             } else {
                 let error = GetLastError();
-                Err(solve_recv_error(error))
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Err(WindowsError::IcmpParseRepliesError(error.0).into())
             }
         }
     }
+
+    #[inline]
+    pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
+        let mut buf = [0u8; Self::REPLY_BUFFER_SIZE];
+        self.get_reply(target, &mut buf)
+    }
+
+    #[inline]
+    pub fn ping_in_detail(&self, target: std::net::Ipv6Addr) -> Result<PingV6Result, PingError> {
+        let mut buf = [0u8; Self::REPLY_BUFFER_SIZE];
+        let duration = self.get_reply(target, &mut buf)?;
+        Ok(PingV6Result {
+            ip: std::net::Ipv6Addr::from(<[u8; 16]>::try_from(&buf[6..22]).unwrap()),
+            duration,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct PingV6Result {
+    pub ip: std::net::Ipv6Addr,
+    pub duration: std::time::Duration,
 }
 
 fn solve_recv_error(error: WIN32_ERROR) -> PingError {
@@ -331,11 +406,16 @@ impl Into<PingV6> for PingV6Builder {
 #[cfg(test)]
 mod tests {
     use crate::base::builder::{PingV4Builder, PingV6Builder};
-    use crate::base::windows::{PingV4, PingV6};
 
     #[test]
     fn test_ping_v4() {
-        let ping: PingV4 = PingV4Builder::default().into();
+        let ping = PingV4Builder {
+            timeout: 200,
+            ttl: Some(50),
+            bind_addr: None,
+            window_addition: None,
+        }
+        .build();
         println!(
             "{} ms",
             ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
@@ -344,16 +424,56 @@ mod tests {
                 / 1000.0
         );
     }
+    
+    #[test]
+    fn test_ping_in_detail() {
+        let ping = PingV4Builder {
+            timeout: 200,
+            ttl: Some(100),
+            bind_addr: None,
+            window_addition: None,
+        }
+            .build();
+        let result = ping.ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
+            .expect("ping_v4_in_detail error");
+        println!(
+            "{},{}",result.ip ,result.duration.as_micros() as f64 / 1000.0
+        );
+    }
 
     #[test]
     fn test_ping_v6() {
-        let ping: PingV6 = PingV6Builder::default().into();
+        let ping = PingV6Builder {
+            timeout: 150,
+            ttl: None,
+            bind_addr: None,
+            scope_id_option: None,
+            window_addition: None,
+        }
+        .build();
         println!(
             "{} ms",
             ping.ping("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
                 .expect("ping_v6 error")
                 .as_micros() as f64
                 / 1000.0
+        );
+    }
+
+    #[test]
+    fn test_ping_v6_in_detail() {
+        let ping = PingV6Builder {
+            timeout: 200,
+            ttl: Some(100),
+            bind_addr: None,
+            scope_id_option: None,
+            window_addition: None,
+        }
+            .build();
+        let result = ping.ping_in_detail("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
+            .expect("ping_v6_in_detail error");
+        println!(
+            "{},{}",result.ip ,result.duration.as_micros() as f64 / 1000.0
         );
     }
 }

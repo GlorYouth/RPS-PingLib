@@ -33,6 +33,9 @@ impl std::fmt::Debug for PingError {
                 WindowsError::IcmpCloseFileError(str) => {
                     write!(f, "PingError::WindowsError(IcmpCloseFileError): {}", str)
                 }
+                WindowsError::IcmpParseRepliesError(u) => {
+                    write!(f, "PingError::WindowsError(IcmpParseRepliesError): {}", u)
+                }
                 WindowsError::InvalidParameter => {
                     write!(f, "PingError::InvalidParameter")
                 }
@@ -83,6 +86,9 @@ impl std::fmt::Display for PingError {
                 }
                 WindowsError::IcmpCloseFileError(str) => {
                     write!(f, "icmp close file error: {}", str)
+                }
+                WindowsError::IcmpParseRepliesError(u) => {
+                    write!(f, "icmp parse replies error: {}", u)
                 }
                 WindowsError::InvalidParameter => {
                     write!(f, "invalid parameter")

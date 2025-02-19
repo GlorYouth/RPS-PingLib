@@ -1,3 +1,5 @@
+use crate::base::{PingV4, PingV6};
+
 pub struct PingV4Builder {
     pub timeout: u32, //ms
     pub ttl: Option<u8>,
@@ -15,6 +17,21 @@ impl Default for PingV4Builder {
             #[cfg(target_os = "windows")]
             window_addition: None,
         }
+    }
+}
+
+impl PingV4Builder {
+    pub fn new(timeout: u32) -> Self {
+        Self {
+            timeout,
+            ttl: None,
+            bind_addr: None,
+            window_addition: None,
+        }
+    }
+
+    pub fn build(self) -> PingV4 {
+        self.into()
     }
 }
 
@@ -37,6 +54,22 @@ impl Default for PingV6Builder {
             #[cfg(target_os = "windows")]
             window_addition: None,
         }
+    }
+}
+
+impl PingV6Builder {
+    pub fn new(timeout: u32) -> Self {
+        Self {
+            timeout,
+            ttl: None,
+            bind_addr: None,
+            scope_id_option: None,
+            window_addition: None,
+        }
+    }
+
+    pub fn build(self) -> PingV6 {
+        self.into()
     }
 }
 
