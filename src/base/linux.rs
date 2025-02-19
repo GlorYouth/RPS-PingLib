@@ -57,7 +57,15 @@ impl PingV4 {
         net::bind_v4(&sock, &SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0))
             .map_err(|e| SharedError::BindError(e.to_string()))?;
 
-        net::connect_v4(&sock, &net::SocketAddrV4::new(target, 0))
+        match self.builder.ttl {
+            None => {}
+            Some(ttl) => {
+                net::sockopt::set_ip_ttl(&sock, ttl as u32)
+                    .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+            }
+        }
+
+        net::connect_v4(&sock, &SocketAddrV4::new(target, 0))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
@@ -106,6 +114,14 @@ impl PingV6 {
         )
         .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
 
+        match self.builder.ttl {
+            None => {}
+            Some(ttl) => {
+                net::sockopt::set_ip_ttl(&sock, ttl as u32)
+                    .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+            }
+        }
+
         net::bind_v6(
             &sock,
             &SocketAddrV6::new(
@@ -119,7 +135,7 @@ impl PingV6 {
 
         net::connect_v6(
             &sock,
-            &net::SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
+            &SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
         )
         .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 

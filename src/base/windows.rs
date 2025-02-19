@@ -1,8 +1,11 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
+use crate::base::utils::UnMut;
 use rand::Rng;
+use std::ptr::{null, null_mut};
 use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
 use windows::Win32::NetworkManagement::IpHelper;
+use windows::Win32::NetworkManagement::IpHelper::{IP_OPTION_INFORMATION, IP_OPTION_INFORMATION32};
 use windows::Win32::Networking::WinSock;
 
 pub enum WindowsError {
@@ -14,16 +17,48 @@ pub enum WindowsError {
 
 pub struct PingV4 {
     builder: PingV4Builder,
+    #[cfg(target_pointer_width = "32")]
+    info: Option<UnMut<IP_OPTION_INFORMATION32>>,
+    #[cfg(target_pointer_width = "64")]
+    info: Option<UnMut<IP_OPTION_INFORMATION>>,
 }
 
 pub struct PingV6 {
     builder: PingV6Builder,
+    #[cfg(target_pointer_width = "32")]
+    info: Option<UnMut<IP_OPTION_INFORMATION32>>,
+    #[cfg(target_pointer_width = "64")]
+    info: Option<UnMut<IP_OPTION_INFORMATION>>,
 }
 
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> PingV4 {
-        PingV4 { builder }
+        match builder.ttl {
+            Some(ttl) => PingV4 {
+                builder,
+                #[cfg(target_pointer_width = "32")]
+                info: Some(UnMut::new(IP_OPTION_INFORMATION32 {
+                    Ttl: ttl,
+                    Tos: 0,
+                    Flags: 0,
+                    OptionsSize: 0,
+                    OptionsData: null_mut(),
+                })),
+                #[cfg(target_pointer_width = "64")]
+                info: Some(UnMut::new(IP_OPTION_INFORMATION {
+                    Ttl: ttl,
+                    Tos: 0,
+                    Flags: 0,
+                    OptionsSize: 0,
+                    OptionsData: null_mut(),
+                })),
+            },
+            None => PingV4 {
+                builder,
+                info: None,
+            },
+        }
     }
 
     pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
@@ -39,10 +74,17 @@ impl PingV4 {
             const REPLY_BUFFER_SIZE: usize =
                 size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
 
+            let request_options = match &self.info {
+                None => None,
+                Some(info) => Some(info.as_const_ref()),
+            };
+
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
             let reply_count = match &self.builder.window_addition {
+                // window_addition 确定第2-4项参数
                 None => match self.builder.bind_addr {
+                    // bind_addr确定调用方法是否有原地址
                     None => IpHelper::IcmpSendEcho2(
                         handler,
                         None,
@@ -51,7 +93,7 @@ impl PingV4 {
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
-                        None,
+                        request_options,
                         reply_buffer.as_ptr() as *mut _,
                         reply_buffer.len() as _,
                         self.builder.timeout,
@@ -65,7 +107,7 @@ impl PingV4 {
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
-                        None,
+                        request_options,
                         reply_buffer.as_ptr() as *mut _,
                         reply_buffer.len() as _,
                         self.builder.timeout,
@@ -80,7 +122,7 @@ impl PingV4 {
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
-                        None,
+                        request_options,
                         reply_buffer.as_ptr() as *mut _,
                         reply_buffer.len() as _,
                         self.builder.timeout,
@@ -94,7 +136,7 @@ impl PingV4 {
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
-                        None,
+                        request_options,
                         reply_buffer.as_ptr() as *mut _,
                         reply_buffer.len() as _,
                         self.builder.timeout,
@@ -118,7 +160,31 @@ impl PingV4 {
 impl PingV6 {
     #[inline]
     pub fn new(builder: PingV6Builder) -> PingV6 {
-        PingV6 { builder }
+        match builder.ttl {
+            Some(ttl) => PingV6 {
+                builder,
+                #[cfg(target_pointer_width = "32")]
+                info: Some(UnMut::new(IP_OPTION_INFORMATION32 {
+                    Ttl: ttl,
+                    Tos: 0,
+                    Flags: 0,
+                    OptionsSize: 0,
+                    OptionsData: null_mut(),
+                })),
+                #[cfg(target_pointer_width = "64")]
+                info: Some(UnMut::new(IP_OPTION_INFORMATION {
+                    Ttl: ttl,
+                    Tos: 0,
+                    Flags: 0,
+                    OptionsSize: 0,
+                    OptionsData: null_mut(),
+                })),
+            },
+            None => PingV6 {
+                builder,
+                info: None,
+            },
+        }
     }
 
     pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
@@ -132,6 +198,11 @@ impl PingV6 {
 
             const REPLY_BUFFER_SIZE: usize =
                 size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
+
+            let request_options = match &self.info {
+                None => None,
+                Some(info) => Some(info.as_const_ref()),
+            };
 
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
@@ -174,7 +245,7 @@ impl PingV6 {
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of_val(&request_data) as _,
-                    None,
+                    request_options,
                     reply_buffer.as_ptr() as *mut _,
                     reply_buffer.len() as _,
                     self.builder.timeout,
@@ -212,7 +283,7 @@ impl PingV6 {
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of_val(&request_data) as _,
-                    None,
+                    request_options,
                     reply_buffer.as_ptr() as *mut _,
                     reply_buffer.len() as _,
                     self.builder.timeout,
@@ -246,14 +317,14 @@ fn solve_recv_error(error: WIN32_ERROR) -> PingError {
 impl Into<PingV4> for PingV4Builder {
     #[inline]
     fn into(self) -> PingV4 {
-        PingV4 { builder: self }
+        PingV4::new(self)
     }
 }
 
 impl Into<PingV6> for PingV6Builder {
     #[inline]
     fn into(self) -> PingV6 {
-        PingV6 { builder: self }
+        PingV6::new(self)
     }
 }
 

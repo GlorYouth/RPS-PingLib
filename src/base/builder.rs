@@ -1,5 +1,6 @@
 pub struct PingV4Builder {
     pub timeout: u32, //ms
+    pub ttl: Option<u8>,
     pub bind_addr: Option<std::net::Ipv4Addr>,
     #[cfg(target_os = "windows")]
     pub window_addition: Option<WindowAddition>,
@@ -9,6 +10,7 @@ impl Default for PingV4Builder {
     fn default() -> Self {
         Self {
             timeout: 1000,
+            ttl: None,
             bind_addr: None,
             #[cfg(target_os = "windows")]
             window_addition: None,
@@ -18,6 +20,7 @@ impl Default for PingV4Builder {
 
 pub struct PingV6Builder {
     pub timeout: u32, //ms
+    pub ttl: Option<u8>,
     pub bind_addr: Option<std::net::Ipv6Addr>,
     pub scope_id_option: Option<u32>,
     #[cfg(target_os = "windows")]
@@ -28,6 +31,7 @@ impl Default for PingV6Builder {
     fn default() -> Self {
         Self {
             timeout: 1000,
+            ttl: None,
             bind_addr: None,
             scope_id_option: None,
             #[cfg(target_os = "windows")]
