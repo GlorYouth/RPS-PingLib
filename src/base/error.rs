@@ -51,10 +51,7 @@ impl std::fmt::Debug for PingError {
                 LinuxError::SetSockOptError(str) => {
                     write!(f, "PingError::LinuxError(SetSockOptError): {}", str)
                 }
-                LinuxError::ConnectFailed(str) => {
-                    write!(f, "PingError::LinuxError(ConnectFailed): {}", str)
-                }
-                LinuxError::SendFailed(str) => {
+                LinuxError::SendtoFailed(str) => {
                     write!(f, "PingError::LinuxError(SendFailed): {}", str)
                 }
                 LinuxError::RecvFailed(str) => {
@@ -105,10 +102,7 @@ impl std::fmt::Display for PingError {
                 LinuxError::SetSockOptError(str) => {
                     write!(f, "failed to set socket option: {}", str)
                 }
-                LinuxError::ConnectFailed(str) => {
-                    write!(f, "failed to connect to socket: {}", str)
-                }
-                LinuxError::SendFailed(str) => {
+                LinuxError::SendtoFailed(str) => {
                     write!(f, "failed to send message to socket: {}", str)
                 }
                 LinuxError::RecvFailed(str) => {
