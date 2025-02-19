@@ -26,6 +26,7 @@ impl PingV4Builder {
             timeout,
             ttl: None,
             bind_addr: None,
+            #[cfg(target_os = "windows")]
             window_addition: None,
         }
     }
@@ -86,6 +87,7 @@ impl PingV6Builder {
             ttl: None,
             bind_addr: None,
             scope_id_option: None,
+            #[cfg(target_os = "windows")]
             window_addition: None,
         }
     }
