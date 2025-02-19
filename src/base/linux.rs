@@ -2,9 +2,14 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use rustix::net;
+use crate::base::builder::{PingV4Builder, PingV6Builder};
 
-pub struct SinglePing {
-    timeout: u32, //ms
+pub struct PingV4 {
+    builder: PingV4Builder,
+}
+
+pub struct PingV6 {
+    builder: PingV6Builder,
 }
 
 pub enum LinuxError {
@@ -16,13 +21,13 @@ pub enum LinuxError {
     RecvFailed(String),
 }
 
-impl SinglePing {
+impl PingV4 {
     #[inline]
-    pub fn new(timeout: u32) -> SinglePing {
-        SinglePing { timeout }
+    pub fn new(builder: PingV4Builder) -> Self {
+        Self { builder }
     }
 
-    pub fn ping_v4(&self, addr: net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+    pub fn ping(&self, target: Ipv4Addr) -> Result<std::time::Duration, PingError> {
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET,
@@ -43,14 +48,14 @@ impl SinglePing {
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(self.timeout.into())),
+            Some(std::time::Duration::from_millis(self.builder.timeout.into())),
         )
         .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
         
         net::bind_v4(&sock, &SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)).
             map_err(|e| SharedError::BindError(e.to_string()))?;
 
-        net::connect_v4(&sock, &net::SocketAddrV4::new(addr, 0))
+        net::connect_v4(&sock, &net::SocketAddrV4::new(target, 0))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
@@ -64,12 +69,16 @@ impl SinglePing {
         Ok(std::time::Instant::now().duration_since(start_time))
     }
     
+}
+
+impl PingV6 {
     #[inline]
-    pub fn ping_v6(&self, addr: net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
-        self.ping_v6_with_scope_id(addr,0)
+    pub fn new(builder: PingV6Builder) -> Self {
+        Self { builder }
     }
 
-    pub fn ping_v6_with_scope_id(&self, addr: net::Ipv6Addr, scope_id: u32) -> Result<std::time::Duration, PingError> {
+    #[inline]
+    pub fn ping(&self, target: Ipv6Addr) -> Result<std::time::Duration, PingError> {
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET6,
@@ -90,14 +99,14 @@ impl SinglePing {
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(self.timeout.into())),
+            Some(std::time::Duration::from_millis(self.builder.timeout.into())),
         )
             .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
-        
-        net::bind_v6(&sock, &SocketAddrV6::new(Ipv6Addr::from(0),0,0, scope_id)).
+
+        net::bind_v6(&sock, &SocketAddrV6::new(Ipv6Addr::from(0),0,0, self.builder.scope_id_option.unwrap_or(0))).
             map_err(|e| SharedError::BindError(e.to_string()))?;
 
-        net::connect_v6(&sock, &net::SocketAddrV6::new(addr, 0, 0, scope_id))
+        net::connect_v6(&sock, &net::SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
@@ -114,19 +123,29 @@ impl SinglePing {
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
+
 }
+
+impl Into<PingV4> for PingV4Builder {
+    #[inline]
+    fn into(self) -> PingV4 {
+        PingV4 { builder: self }
+    }
+}
+
+impl Into<PingV6> for PingV6Builder {
+    #[inline]
+    fn into(self) -> PingV6 {
+        PingV6 { builder: self }
+    }
+}
+
 
 fn solve_recv_error(error: rustix::io::Errno) -> PingError {
     match error.to_owned().raw_os_error() {
         11 => SharedError::Timeout.into(),
         101 => SharedError::Unreachable.into(),
         _ => LinuxError::RecvFailed(error.to_string()).into(),
-    }
-}
-
-impl Default for SinglePing {
-    fn default() -> SinglePing {
-        SinglePing { timeout: 1000 }
     }
 }
 
@@ -180,14 +199,15 @@ impl PingICMP {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::linux::SinglePing;
+    use crate::base::builder::{PingV4Builder, PingV6Builder};
+    use crate::{PingV4, PingV6};
 
     #[test]
     fn test_ping_v4() {
-        let ping = SinglePing::default();
+        let ping: PingV4 = PingV4Builder::default().into();
         println!(
             "{} ms",
-            ping.ping_v4(std::net::Ipv4Addr::new(1, 1, 1, 1))
+            ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
                 .expect("ping_v4 error")
                 .as_micros() as f64
                 / 1000.0
@@ -196,10 +216,10 @@ mod tests {
 
     #[test]
     fn test_ping_v6() {
-        let ping = SinglePing::default();
+        let ping: PingV6 = PingV6Builder::default().into();
         println!(
             "{} ms",
-            ping.ping_v6("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
+            ping.ping("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
                 .expect("ping_v6 error")
                 .as_micros() as f64
                 / 1000.0

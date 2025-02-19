@@ -1,3 +1,4 @@
+use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
@@ -11,48 +12,29 @@ pub enum WindowsError {
     UnknownError(u32),
 }
 
-pub struct SinglePing {
-    event: Option<windows::Win32::Foundation::HANDLE>,
-    apc_routine: Option<windows::Win32::System::IO::PIO_APC_ROUTINE>,
-    apc_context: Option<*const core::ffi::c_void>,
-    request_option: Option<*const IpHelper::IP_OPTION_INFORMATION>,
-    // if you want to use above variables, please read
-    // https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho2 for ipv4
-    // https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmp6sendecho2 for ipv6
-    timeout: u32, //ms
+pub struct PingV4 {
+    builder: PingV4Builder,
 }
 
-impl Default for SinglePing {
-    fn default() -> Self {
-        Self {
-            event: None,
-            apc_routine: None,
-            apc_context: None,
-            request_option: None,
-            timeout: 1000,
-        }
-    }
+
+pub struct PingV6 {
+    builder: PingV6Builder,
 }
 
-impl SinglePing {
+
+impl PingV4 {
     #[inline]
-    pub fn new(timeout: u32) -> Self {
-        Self {
-            event: None,
-            apc_routine: None,
-            apc_context: None,
-            request_option: None,
-            timeout,
-        }
+    pub fn new(builder: PingV4Builder) -> PingV4 {
+        PingV4 { builder }
     }
 
-    pub fn ping_v4(&self, addr: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
-            let des = addr.to_bits();
+            let des = target.to_bits();
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
@@ -61,19 +43,78 @@ impl SinglePing {
 
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
 
-            let reply_count = IpHelper::IcmpSendEcho2(
-                handler,
-                self.event,
-                self.apc_routine,
-                self.apc_context,
-                des,
-                request_data.to_be_bytes().as_ptr() as *mut _,
-                size_of_val(&request_data) as _,
-                self.request_option,
-                reply_buffer.as_ptr() as *mut _,
-                reply_buffer.len() as _,
-                self.timeout,
-            );
+            let reply_count = match &self.builder.window_addition {
+                None => {
+                    match self.builder.bind_addr {
+                        None => {
+                            IpHelper::IcmpSendEcho2(
+                                handler,
+                                None,
+                                None,
+                                None,
+                                des,
+                                request_data.to_be_bytes().as_ptr() as *mut _,
+                                size_of_val(&request_data) as _,
+                                None,
+                                reply_buffer.as_ptr() as *mut _,
+                                reply_buffer.len() as _,
+                                self.builder.timeout,
+                            )
+                        }
+                        Some(addr) => {
+                            IpHelper::IcmpSendEcho2Ex(
+                                handler,
+                                None,
+                                None,
+                                None,
+                                addr.to_bits(),
+                                des,
+                                request_data.to_be_bytes().as_ptr() as *mut _,
+                                size_of_val(&request_data) as _,
+                                None,
+                                reply_buffer.as_ptr() as *mut _,
+                                reply_buffer.len() as _,
+                                self.builder.timeout,
+                            )
+                        }
+                    }
+                }
+                Some(addition) => {
+                    match self.builder.bind_addr {
+                        None => {
+                            IpHelper::IcmpSendEcho2(
+                                handler,
+                                addition.event,
+                                addition.apc_routine,
+                                addition.apc_context,
+                                des,
+                                request_data.to_be_bytes().as_ptr() as *mut _,
+                                size_of_val(&request_data) as _,
+                                None,
+                                reply_buffer.as_ptr() as *mut _,
+                                reply_buffer.len() as _,
+                                self.builder.timeout,
+                            )
+                        }
+                        Some(addr) => {
+                            IpHelper::IcmpSendEcho2Ex(
+                                handler,
+                                addition.event,
+                                addition.apc_routine,
+                                addition.apc_context,
+                                addr.to_bits(),
+                                des,
+                                request_data.to_be_bytes().as_ptr() as *mut _,
+                                size_of_val(&request_data) as _,
+                                None,
+                                reply_buffer.as_ptr() as *mut _,
+                                reply_buffer.len() as _,
+                                self.builder.timeout,
+                            )
+                        }
+                    }
+                }
+            };
 
             IpHelper::IcmpCloseHandle(handler)
                 .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
@@ -86,8 +127,16 @@ impl SinglePing {
             }
         }
     }
+    
+}
 
-    pub fn ping_v6(&self, addr: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
+impl PingV6 {
+    #[inline]
+    pub fn new(builder: PingV6Builder) -> PingV6 {
+        PingV6 { builder }
+    }
+    
+    pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
         unsafe {
             let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
@@ -100,41 +149,88 @@ impl SinglePing {
                 size_of::<IpHelper::ICMP_ECHO_REPLY>() + size_of::<u128>() + 8;
 
             let reply_buffer = [0_u8; REPLY_BUFFER_SIZE];
+            
+            let bind_addr = match self.builder.bind_addr {
+                None => {std::mem::zeroed()}
+                Some(addr) => {
+                    addr.into()
+                }
+            };
 
-            let reply_count = IpHelper::Icmp6SendEcho2(
-                handler,
-                self.event,
-                self.apc_routine,
-                self.apc_context,
-                &WinSock::SOCKADDR_IN6 {
-                    sin6_family: WinSock::AF_INET6,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: WinSock::IN6_ADDR {
-                        u: WinSock::IN6_ADDR_0 {
-                            Byte: std::mem::zeroed(),
+            let reply_count = match &self.builder.window_addition {
+                None => {
+                    IpHelper::Icmp6SendEcho2(
+                        handler,
+                        None,
+                        None,
+                        None,
+                        &WinSock::SOCKADDR_IN6 {
+                            sin6_family: WinSock::AF_INET6,
+                            sin6_port: 0,
+                            sin6_flowinfo: 0,
+                            sin6_addr: WinSock::IN6_ADDR {
+                                u: WinSock::IN6_ADDR_0 {
+                                    Byte: bind_addr,
+                                },
+                            },
+                            Anonymous: Default::default(),
                         },
-                    },
-                    Anonymous: Default::default(),
-                },
-                &WinSock::SOCKADDR_IN6 {
-                    sin6_family: WinSock::AF_INET6,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: WinSock::IN6_ADDR {
-                        u: WinSock::IN6_ADDR_0 {
-                            Byte: std::mem::transmute(addr),
+                        &WinSock::SOCKADDR_IN6 {
+                            sin6_family: WinSock::AF_INET6,
+                            sin6_port: 0,
+                            sin6_flowinfo: 0,
+                            sin6_addr: WinSock::IN6_ADDR {
+                                u: WinSock::IN6_ADDR_0 {
+                                    Byte: std::mem::transmute(target),
+                                },
+                            },
+                            Anonymous: Default::default(),
                         },
-                    },
-                    Anonymous: Default::default(),
-                },
-                request_data.to_be_bytes().as_ptr() as *mut _,
-                size_of_val(&request_data) as _,
-                self.request_option,
-                reply_buffer.as_ptr() as *mut _,
-                reply_buffer.len() as _,
-                self.timeout,
-            );
+                        request_data.to_be_bytes().as_ptr() as *mut _,
+                        size_of_val(&request_data) as _,
+                        None,
+                        reply_buffer.as_ptr() as *mut _,
+                        reply_buffer.len() as _,
+                        self.builder.timeout,
+                    )
+                }
+                Some(addition) => {
+                    IpHelper::Icmp6SendEcho2(
+                        handler,
+                        addition.event,
+                        addition.apc_routine,
+                        addition.apc_context,
+                        &WinSock::SOCKADDR_IN6 {
+                            sin6_family: WinSock::AF_INET6,
+                            sin6_port: 0,
+                            sin6_flowinfo: 0,
+                            sin6_addr: WinSock::IN6_ADDR {
+                                u: WinSock::IN6_ADDR_0 {
+                                    Byte: bind_addr,
+                                },
+                            },
+                            Anonymous: Default::default(),
+                        },
+                        &WinSock::SOCKADDR_IN6 {
+                            sin6_family: WinSock::AF_INET6,
+                            sin6_port: 0,
+                            sin6_flowinfo: 0,
+                            sin6_addr: WinSock::IN6_ADDR {
+                                u: WinSock::IN6_ADDR_0 {
+                                    Byte: target.into(),
+                                },
+                            },
+                            Anonymous: Default::default(),
+                        },
+                        request_data.to_be_bytes().as_ptr() as *mut _,
+                        size_of_val(&request_data) as _,
+                        None,
+                        reply_buffer.as_ptr() as *mut _,
+                        reply_buffer.len() as _,
+                        self.builder.timeout,
+                    )
+                }
+            };
 
             IpHelper::IcmpCloseHandle(handler)
                 .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
@@ -146,31 +242,6 @@ impl SinglePing {
                 Err(solve_recv_error(error))
             }
         }
-    }
-
-    #[inline]
-    pub fn set_event(&mut self, event: windows::Win32::Foundation::HANDLE) {
-        self.event = Some(event)
-    }
-
-    #[inline]
-    pub fn set_apc_routine(&mut self, apc_routine: windows::Win32::System::IO::PIO_APC_ROUTINE) {
-        self.apc_routine = Some(apc_routine)
-    }
-
-    #[inline]
-    pub fn set_apc_context(&mut self, apc_context: *const core::ffi::c_void) {
-        self.apc_context = Some(apc_context)
-    }
-
-    #[inline]
-    pub fn set_request_option(&mut self, request_option: *const IpHelper::IP_OPTION_INFORMATION) {
-        self.request_option = Some(request_option)
-    }
-
-    #[inline]
-    pub fn set_timeout(&mut self, timeout: u32) {
-        self.timeout = timeout
     }
 }
 
@@ -185,16 +256,31 @@ fn solve_recv_error(error: WIN32_ERROR) -> PingError {
     }
 }
 
+impl Into<PingV4> for PingV4Builder {
+    #[inline]
+    fn into(self) -> PingV4 {
+        PingV4 { builder: self }
+    }
+}
+
+impl Into<PingV6> for PingV6Builder {
+    #[inline]
+    fn into(self) -> PingV6 {
+        PingV6 { builder: self }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::base::windows::SinglePing;
+    use crate::base::builder::{PingV4Builder, PingV6Builder};
+    use crate::base::windows::{PingV4, PingV6};
 
     #[test]
     fn test_ping_v4() {
-        let ping = SinglePing::default();
+        let ping: PingV4 = PingV4Builder::default().into();
         println!(
             "{} ms",
-            ping.ping_v4(std::net::Ipv4Addr::new(1, 1, 1, 1))
+            ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
                 .expect("ping_v4 error")
                 .as_micros() as f64
                 / 1000.0
@@ -203,10 +289,10 @@ mod tests {
 
     #[test]
     fn test_ping_v6() {
-        let ping = SinglePing::default();
+        let ping: PingV6 = PingV6Builder::default().into();
         println!(
             "{} ms",
-            ping.ping_v6("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
+            ping.ping("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
                 .expect("ping_v6 error")
                 .as_micros() as f64
                 / 1000.0
