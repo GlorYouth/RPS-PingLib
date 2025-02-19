@@ -58,8 +58,13 @@ impl SinglePing {
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
-
+    
+    #[inline]
     pub fn ping_v6(&self, addr: net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
+        self.ping_v6_with_scope_id(addr,0)
+    }
+
+    pub fn ping_v6_with_scope_id(&self, addr: net::Ipv6Addr, scope_id: u32) -> Result<std::time::Duration, PingError> {
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET6,
@@ -67,7 +72,7 @@ impl SinglePing {
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMPV6),
         )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
         #[cfg(not(feature = "DGRAM_SOCKET"))]
         let sock = net::socket(
             net::AddressFamily::INET6,
@@ -75,16 +80,16 @@ impl SinglePing {
             net::SocketType::RAW,
             Some(net::ipproto::ICMPV6),
         )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
             Some(std::time::Duration::from_millis(self.timeout.into())),
         )
-        .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+            .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
 
-        net::connect_v6(&sock, &net::SocketAddrV6::new(addr, 0, 0, 0))
+        net::connect_v6(&sock, &net::SocketAddrV6::new(addr, 0, 0, scope_id))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
@@ -94,7 +99,7 @@ impl SinglePing {
             PingICMP::new(128).as_slice(),
             net::SendFlags::empty(),
         )
-        .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
+            .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
 
         let mut buff = [0_u8; 20];
         net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
