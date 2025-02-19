@@ -1,3 +1,4 @@
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use rustix::net;
@@ -9,6 +10,7 @@ pub struct SinglePing {
 pub enum LinuxError {
     SocketSetupFailed(String),
     SetSockOptError(String),
+
     ConnectFailed(String),
     SendFailed(String),
     RecvFailed(String),
@@ -44,6 +46,9 @@ impl SinglePing {
             Some(std::time::Duration::from_millis(self.timeout.into())),
         )
         .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+        
+        net::bind_v4(&sock, &SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)).
+            map_err(|e| SharedError::BindError(e.to_string()))?;
 
         net::connect_v4(&sock, &net::SocketAddrV4::new(addr, 0))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
@@ -88,6 +93,9 @@ impl SinglePing {
             Some(std::time::Duration::from_millis(self.timeout.into())),
         )
             .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+        
+        net::bind_v6(&sock, &SocketAddrV6::new(Ipv6Addr::from(0),0,0, scope_id)).
+            map_err(|e| SharedError::BindError(e.to_string()))?;
 
         net::connect_v6(&sock, &net::SocketAddrV6::new(addr, 0, 0, scope_id))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;

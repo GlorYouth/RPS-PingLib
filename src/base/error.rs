@@ -21,6 +21,9 @@ impl std::fmt::Debug for PingError {
                 SharedError::Unreachable => {
                     write!(f, "SharedError::Unreachable")
                 }
+                SharedError::BindError(str) => {
+                    write!(f, "SharedError::BindError({})", str)
+                } 
             },
             #[cfg(target_os = "windows")]
             PingError::WindowsError(e) => match e {
@@ -69,6 +72,9 @@ impl std::fmt::Display for PingError {
                 SharedError::Unreachable => {
                     write!(f, "ping unreachable")
                 }
+                SharedError::BindError(str) => {
+                    write!(f, "ping bind error: {}", str)
+                }
             },
             #[cfg(target_os = "windows")]
             PingError::WindowsError(e) => match e {
@@ -110,6 +116,7 @@ impl std::fmt::Display for PingError {
 pub enum SharedError {
     Timeout,
     Unreachable,
+    BindError(String),
 }
 
 impl From<SharedError> for PingError {
