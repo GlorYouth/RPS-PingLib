@@ -153,7 +153,7 @@ impl PingV6 {
             let bind_addr = match self.builder.bind_addr {
                 None => {std::mem::zeroed()}
                 Some(addr) => {
-                    std::mem::transmute(target)
+                    std::mem::transmute(addr)
                 }
             };
 
@@ -173,7 +173,12 @@ impl PingV6 {
                                     Byte: bind_addr,
                                 },
                             },
-                            Anonymous: Default::default(),
+                            Anonymous: match self.builder.scope_id_option {
+                                None => Default::default(),
+                                Some(id) => WinSock::SOCKADDR_IN6_0 {
+                                    sin6_scope_id: id,
+                                }
+                            },
                         },
                         &WinSock::SOCKADDR_IN6 {
                             sin6_family: WinSock::AF_INET6,
@@ -184,7 +189,12 @@ impl PingV6 {
                                     Byte: std::mem::transmute(target),
                                 },
                             },
-                            Anonymous: Default::default(),
+                            Anonymous: match self.builder.scope_id_option {
+                                None => Default::default(),
+                                Some(id) => WinSock::SOCKADDR_IN6_0 {
+                                    sin6_scope_id: id,
+                                }
+                            },
                         },
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
@@ -209,7 +219,12 @@ impl PingV6 {
                                     Byte: bind_addr,
                                 },
                             },
-                            Anonymous: Default::default(),
+                            Anonymous: match self.builder.scope_id_option {
+                                None => Default::default(),
+                                Some(id) => WinSock::SOCKADDR_IN6_0 {
+                                    sin6_scope_id: id,
+                                }
+                            },
                         },
                         &WinSock::SOCKADDR_IN6 {
                             sin6_family: WinSock::AF_INET6,
@@ -220,7 +235,12 @@ impl PingV6 {
                                     Byte: std::mem::transmute(target),
                                 },
                             },
-                            Anonymous: Default::default(),
+                            Anonymous: match self.builder.scope_id_option {
+                                None => Default::default(),
+                                Some(id) => WinSock::SOCKADDR_IN6_0 {
+                                    sin6_scope_id: id,
+                                }
+                            },
                         },
                         request_data.to_be_bytes().as_ptr() as *mut _,
                         size_of_val(&request_data) as _,
