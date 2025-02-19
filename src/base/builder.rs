@@ -110,7 +110,7 @@ impl PingV6Builder {
     pub fn set_bind_addr(&mut self, bind_addr: Option<std::net::Ipv6Addr>) {
         self.bind_addr = bind_addr;
     }
-    
+
     #[inline]
     pub fn set_scope_id_option(&mut self, scope_id_option: Option<u32>) {
         self.scope_id_option = scope_id_option;

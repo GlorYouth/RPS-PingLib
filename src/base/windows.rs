@@ -1,6 +1,7 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::base::utils::UnMut;
+use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
 use std::ptr::null_mut;
 use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
@@ -10,7 +11,6 @@ use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
 #[cfg(target_pointer_width = "32")]
 use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32;
 use windows::Win32::Networking::WinSock;
-use crate::{PingV4Result, PingV6Result};
 
 pub enum WindowsError {
     IcmpCreateFileError(String),
@@ -190,7 +190,6 @@ impl PingV4 {
     }
 }
 
-
 impl PingV6 {
     #[inline]
     pub fn new(builder: PingV6Builder) -> PingV6 {
@@ -367,7 +366,6 @@ impl PingV6 {
     }
 }
 
-
 fn solve_recv_error(error: WIN32_ERROR) -> PingError {
     match error {
         WIN32_ERROR(11010) => SharedError::Timeout.into(),
@@ -414,7 +412,7 @@ mod tests {
                 / 1000.0
         );
     }
-    
+
     #[test]
     fn test_ping_in_detail() {
         let ping = PingV4Builder {
@@ -423,11 +421,14 @@ mod tests {
             bind_addr: None,
             window_addition: None,
         }
-            .build();
-        let result = ping.ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
+        .build();
+        let result = ping
+            .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
             .expect("ping_v4_in_detail error");
         println!(
-            "{},{}",result.ip ,result.duration.as_micros() as f64 / 1000.0
+            "{},{}",
+            result.ip,
+            result.duration.as_micros() as f64 / 1000.0
         );
     }
 
@@ -459,11 +460,14 @@ mod tests {
             scope_id_option: None,
             window_addition: None,
         }
-            .build();
-        let result = ping.ping_in_detail("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
+        .build();
+        let result = ping
+            .ping_in_detail("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
             .expect("ping_v6_in_detail error");
         println!(
-            "{},{}",result.ip ,result.duration.as_micros() as f64 / 1000.0
+            "{},{}",
+            result.ip,
+            result.duration.as_micros() as f64 / 1000.0
         );
     }
 }

@@ -15,7 +15,7 @@ pub struct PingV6 {
 pub enum LinuxError {
     SocketSetupFailed(String),
     SetSockOptError(String),
-    
+
     SendtoFailed(String),
     RecvFailed(String),
 }
@@ -73,14 +73,20 @@ impl PingV4 {
         let mut buff = [0_u8; PingICMP::DATA_SIZE];
         let start_time = std::time::Instant::now();
 
-        net::sendto_v4(&sock, &sent, net::SendFlags::empty(),&SocketAddrV4::new(target, 0))
-            .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
+        net::sendto_v4(
+            &sock,
+            &sent,
+            net::SendFlags::empty(),
+            &SocketAddrV4::new(target, 0),
+        )
+        .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
 
         loop {
-            net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
+            net::recv(&sock, &mut buff, net::RecvFlags::empty())
+                .map_err(|e| solve_recv_error(e))?;
             let duration = std::time::Instant::now().duration_since(start_time);
             if buff[6..].eq(&sent[6..]) {
-                return Ok(duration)
+                return Ok(duration);
             }
         }
     }
@@ -132,30 +138,31 @@ impl PingV6 {
             Some(addr) => {
                 net::bind_v6(
                     &sock,
-                    &SocketAddrV6::new(
-                        addr,
-                        0,
-                        0,
-                        self.builder.scope_id_option.unwrap_or(0),
-                    ),
+                    &SocketAddrV6::new(addr, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
                 )
-                    .map_err(|e| SharedError::BindError(e.to_string()))?;
-            },
+                .map_err(|e| SharedError::BindError(e.to_string()))?;
+            }
             None => {}
         }
 
         let sent = PingICMP::new(128).data;
         let mut buff = [0_u8; PingICMP::DATA_SIZE];
         let start_time = std::time::Instant::now();
-        
-        net::sendto_v6(&sock, &sent, net::SendFlags::empty(), &SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)))
-            .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
+
+        net::sendto_v6(
+            &sock,
+            &sent,
+            net::SendFlags::empty(),
+            &SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
+        )
+        .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
 
         loop {
-            net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
+            net::recv(&sock, &mut buff, net::RecvFlags::empty())
+                .map_err(|e| solve_recv_error(e))?;
             let duration = std::time::Instant::now().duration_since(start_time);
             if buff[6..].eq(&sent[6..]) {
-                return Ok(duration)
+                return Ok(duration);
             }
         }
     }
@@ -196,7 +203,6 @@ impl PingICMP {
         let mut data = [0_u8; Self::DATA_SIZE];
         data[0] = icmp_type;
         data[6..].copy_from_slice(&request_data.to_be_bytes());
-
 
         let mut sum: u32 = 0;
         let mut i = 0;
@@ -242,7 +248,8 @@ mod tests {
             timeout: 1000,
             ttl: Some(50),
             bind_addr: None,
-        }.into();
+        }
+        .into();
         println!(
             "{} ms",
             ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
