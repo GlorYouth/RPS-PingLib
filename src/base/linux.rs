@@ -1,8 +1,8 @@
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use rand::Rng;
 use rustix::net;
-use crate::base::builder::{PingV4Builder, PingV6Builder};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -48,12 +48,14 @@ impl PingV4 {
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(self.builder.timeout.into())),
+            Some(std::time::Duration::from_millis(
+                self.builder.timeout.into(),
+            )),
         )
         .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
-        
-        net::bind_v4(&sock, &SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)).
-            map_err(|e| SharedError::BindError(e.to_string()))?;
+
+        net::bind_v4(&sock, &SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0))
+            .map_err(|e| SharedError::BindError(e.to_string()))?;
 
         net::connect_v4(&sock, &net::SocketAddrV4::new(target, 0))
             .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
@@ -68,7 +70,6 @@ impl PingV4 {
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
-    
 }
 
 impl PingV6 {
@@ -86,7 +87,7 @@ impl PingV6 {
             net::SocketType::DGRAM,
             Some(net::ipproto::ICMPV6),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
         #[cfg(not(feature = "DGRAM_SOCKET"))]
         let sock = net::socket(
             net::AddressFamily::INET6,
@@ -94,20 +95,33 @@ impl PingV6 {
             net::SocketType::RAW,
             Some(net::ipproto::ICMPV6),
         )
-            .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
 
         net::sockopt::set_socket_timeout(
             &sock,
             net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(self.builder.timeout.into())),
+            Some(std::time::Duration::from_millis(
+                self.builder.timeout.into(),
+            )),
         )
-            .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+        .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
 
-        net::bind_v6(&sock, &SocketAddrV6::new(Ipv6Addr::from(0),0,0, self.builder.scope_id_option.unwrap_or(0))).
-            map_err(|e| SharedError::BindError(e.to_string()))?;
+        net::bind_v6(
+            &sock,
+            &SocketAddrV6::new(
+                Ipv6Addr::from(0),
+                0,
+                0,
+                self.builder.scope_id_option.unwrap_or(0),
+            ),
+        )
+        .map_err(|e| SharedError::BindError(e.to_string()))?;
 
-        net::connect_v6(&sock, &net::SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)))
-            .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
+        net::connect_v6(
+            &sock,
+            &net::SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
+        )
+        .map_err(|e| LinuxError::ConnectFailed(e.to_string()))?;
 
         let start_time = std::time::Instant::now();
 
@@ -116,14 +130,13 @@ impl PingV6 {
             PingICMP::new(128).as_slice(),
             net::SendFlags::empty(),
         )
-            .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
+        .map_err(|e| LinuxError::SendFailed(e.to_string()))?;
 
         let mut buff = [0_u8; 20];
         net::recv(&sock, &mut buff, net::RecvFlags::empty()).map_err(|e| solve_recv_error(e))?;
 
         Ok(std::time::Instant::now().duration_since(start_time))
     }
-
 }
 
 impl Into<PingV4> for PingV4Builder {
@@ -139,7 +152,6 @@ impl Into<PingV6> for PingV6Builder {
         PingV6 { builder: self }
     }
 }
-
 
 fn solve_recv_error(error: rustix::io::Errno) -> PingError {
     match error.to_owned().raw_os_error() {

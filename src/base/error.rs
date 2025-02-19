@@ -23,7 +23,7 @@ impl std::fmt::Debug for PingError {
                 }
                 SharedError::BindError(str) => {
                     write!(f, "SharedError::BindError({})", str)
-                } 
+                }
             },
             #[cfg(target_os = "windows")]
             PingError::WindowsError(e) => match e {
