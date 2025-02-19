@@ -6,6 +6,8 @@ use rand::Rng;
 use rustix::net;
 use rustix::net::SocketAddrAny;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use crate::base::protocol::Ipv4Header;
+use crate::base::utils::SliceReader;
 
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -25,6 +27,8 @@ pub enum LinuxError {
     MissRespondAddr,
 }
 
+
+
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> Self {
@@ -34,9 +38,9 @@ impl PingV4 {
     fn get_reply(
         &self,
         target: Ipv4Addr,
-    ) -> Result<(std::time::Duration, Option<SocketAddrAny>), PingError> {
+    ) -> Result<(std::time::Duration, Ipv4Addr), PingError> {
         unsafe {
-            let sock = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP);
+            let sock = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP);
             if sock == -1 {
                 return Err(LinuxError::SocketSetupFailed(sock.to_string()).into());
             }
@@ -97,7 +101,7 @@ impl PingV4 {
 
             let sent = PingICMP::new(8).data;
             {
-                let addr = libc::sockaddr_in {
+                let addr = sockaddr_in {
                     sin_family: libc::AF_INET as u16,
                     sin_port: 0,
                     sin_addr: std::mem::transmute(target),
@@ -117,87 +121,22 @@ impl PingV4 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE + PingICMP::DATA_SIZE];
             {
-                let mut from_addr = [0_u8; size_of::<sockaddr_in>()];
-                let mut addr_len = 0_u32;
-                let err = libc::recvfrom(
+                let err = libc::recv(
                     sock,
                     buff.as_mut_ptr() as *mut _,
-                    PingICMP::DATA_SIZE,
+                    Ipv4Header::FIXED_HEADER_SIZE + PingICMP::DATA_SIZE,
                     0,
-                    from_addr.as_mut_ptr() as *mut _,
-                    &mut addr_len as *mut _,
                 );
+                let duration = std::time::Instant::now().duration_since(start_time);
                 if err == -1 {
                     println!("{:?}", *libc::__errno_location());
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
                 }
-                println!("{:?}", from_addr);
-                println!("{:?}", buff);
-                panic!()
-            }
-        }
-        #[cfg(feature = "DGRAM_SOCKET")]
-        let sock = net::socket(
-            net::AddressFamily::INET,
-            #[cfg(feature = "DGRAM_SOCKET")]
-            net::SocketType::DGRAM,
-            Some(net::ipproto::ICMP),
-        )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
-        #[cfg(not(feature = "DGRAM_SOCKET"))]
-        let sock = net::socket(
-            net::AddressFamily::INET,
-            #[cfg(not(feature = "DGRAM_SOCKET"))]
-            net::SocketType::RAW,
-            Some(net::ipproto::ICMP),
-        )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
-
-        net::sockopt::set_socket_timeout(
-            &sock,
-            net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(
-                self.builder.timeout.into(),
-            )),
-        )
-        .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
-
-        match self.builder.bind_addr {
-            None => {}
-            Some(addr) => {
-                net::bind_v4(&sock, &SocketAddrV4::new(addr, 0))
-                    .map_err(|e| SharedError::BindError(e.to_string()))?;
-            }
-        }
-
-        match self.builder.ttl {
-            None => {}
-            Some(ttl) => {
-                net::sockopt::set_ip_ttl(&sock, ttl as u32)
-                    .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
-            }
-        }
-
-        let sent = PingICMP::new(8).data;
-        let mut buff = [0_u8; PingICMP::DATA_SIZE];
-        let start_time = std::time::Instant::now();
-
-        net::sendto_v4(
-            &sock,
-            &sent,
-            net::SendFlags::empty(),
-            &SocketAddrV4::new(target, 0),
-        )
-        .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
-
-        loop {
-            let result = net::recvfrom(&sock, &mut buff, net::RecvFlags::DONTWAIT)
-                .map_err(|e| solve_recv_error(e))?;
-            let duration = std::time::Instant::now().duration_since(start_time);
-            if buff[6..].eq(&sent[6..]) {
-                return Ok((duration, result.1));
+                let mut reader = SliceReader::from_slice(buff.as_ref());
+                let header = Ipv4Header::from_reader(&mut reader);
+                Ok((duration,header.get_source_address()))
             }
         }
     }
@@ -210,14 +149,10 @@ impl PingV4 {
     #[inline]
     pub fn ping_in_detail(&self, target: Ipv4Addr) -> Result<PingV4Result, PingError> {
         let res = self.get_reply(target)?;
-        if let Some(SocketAddrAny::V4(addr)) = res.1 {
-            Ok(PingV4Result {
-                ip: *addr.ip(),
-                duration: res.0,
-            })
-        } else {
-            Err(LinuxError::MissRespondAddr.into())
-        }
+        Ok(PingV4Result {
+            ip: res.1,
+            duration: res.0,
+        })
     }
 }
 

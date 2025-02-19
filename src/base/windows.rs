@@ -1,6 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::utils::UnMut;
+use crate::base::utils::un_mut::UnMut;
 use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
 use std::ptr::null_mut;
@@ -417,7 +417,7 @@ mod tests {
     fn test_ping_in_detail() {
         let ping = PingV4Builder {
             timeout: 200,
-            ttl: Some(100),
+            ttl: Some(5),
             bind_addr: None,
             window_addition: None,
         }
