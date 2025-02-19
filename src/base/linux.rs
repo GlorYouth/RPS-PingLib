@@ -1,6 +1,7 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::{PingV4Result, PingV6Result};
+use libc::{sockaddr, sockaddr_in};
 use rand::Rng;
 use rustix::net;
 use rustix::net::SocketAddrAny;
@@ -34,6 +35,109 @@ impl PingV4 {
         &self,
         target: Ipv4Addr,
     ) -> Result<(std::time::Duration, Option<SocketAddrAny>), PingError> {
+        unsafe {
+            let sock = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP);
+            if sock == -1 {
+                return Err(LinuxError::SocketSetupFailed(sock.to_string()).into());
+            }
+
+            {
+                let millis = self.builder.timeout;
+                let timeval = libc::timeval {
+                    tv_sec: (millis / 1000) as libc::time_t,
+                    tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
+                };
+                let err = libc::setsockopt(
+                    sock,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVTIMEO_NEW,
+                    &timeval as *const _ as *const libc::c_void,
+                    size_of_val(&timeval) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(LinuxError::SetSockOptError(sock.to_string()).into());
+                }
+            }
+
+            {
+                let sock_addr = sockaddr_in {
+                    sin_family: libc::AF_INET as u16,
+                    sin_port: 0,
+                    sin_addr: libc::in_addr { s_addr: 0 },
+                    sin_zero: Default::default(),
+                };
+
+                let err = libc::bind(
+                    sock,
+                    &sock_addr as *const _ as *const sockaddr,
+                    size_of_val(&sock_addr) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(SharedError::BindError(err.to_string()).into());
+                }
+            }
+
+            {
+                match self.builder.ttl {
+                    None => {}
+                    Some(ttl) => {
+                        let err = libc::setsockopt(
+                            sock,
+                            libc::SOL_IP,
+                            libc::IP_TTL,
+                            &ttl as *const _ as *const libc::c_void,
+                            size_of_val(&ttl) as libc::socklen_t,
+                        );
+                        if err == -1 {
+                            return Err(LinuxError::SetSockOptError(sock.to_string()).into());
+                        }
+                    }
+                }
+            }
+
+            let sent = PingICMP::new(8).data;
+            {
+                let addr = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as u16,
+                    sin_port: 0,
+                    sin_addr: std::mem::transmute(target),
+                    sin_zero: Default::default(),
+                };
+                let err = libc::sendto(
+                    sock,
+                    sent.as_ptr() as *const _,
+                    PingICMP::DATA_SIZE,
+                    0,
+                    &addr as *const _ as *const sockaddr,
+                    size_of_val(&addr) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(LinuxError::SendtoFailed(sock.to_string()).into());
+                }
+            }
+            let start_time = std::time::Instant::now();
+
+            let mut buff = [0_u8; PingICMP::DATA_SIZE];
+            {
+                let mut from_addr = [0_u8; size_of::<sockaddr_in>()];
+                let mut addr_len = 0_u32;
+                let err = libc::recvfrom(
+                    sock,
+                    buff.as_mut_ptr() as *mut _,
+                    PingICMP::DATA_SIZE,
+                    0,
+                    from_addr.as_mut_ptr() as *mut _,
+                    &mut addr_len as *mut _,
+                );
+                if err == -1 {
+                    println!("{:?}", *libc::__errno_location());
+                    return Err(LinuxError::RecvFailed(sock.to_string()).into());
+                }
+                println!("{:?}", from_addr);
+                println!("{:?}", buff);
+                panic!()
+            }
+        }
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET,
