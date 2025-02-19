@@ -9,6 +9,9 @@ mod builder;
 mod utils;
 #[cfg(target_os = "windows")]
 mod windows;
+mod result;
+
+pub use result::*;
 
 #[cfg(target_os = "windows")]
 pub use windows::PingV4;

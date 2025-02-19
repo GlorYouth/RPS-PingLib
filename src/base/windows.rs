@@ -10,6 +10,7 @@ use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
 #[cfg(target_pointer_width = "32")]
 use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32;
 use windows::Win32::Networking::WinSock;
+use crate::{PingV4Result, PingV6Result};
 
 pub enum WindowsError {
     IcmpCreateFileError(String),
@@ -189,12 +190,6 @@ impl PingV4 {
     }
 }
 
-#[derive(Debug)]
-pub struct PingV4Result {
-    pub ip: std::net::Ipv4Addr,
-    pub duration: std::time::Duration,
-}
-
 
 impl PingV6 {
     #[inline]
@@ -372,11 +367,6 @@ impl PingV6 {
     }
 }
 
-#[derive(Debug)]
-pub struct PingV6Result {
-    pub ip: std::net::Ipv6Addr,
-    pub duration: std::time::Duration,
-}
 
 fn solve_recv_error(error: WIN32_ERROR) -> PingError {
     match error {
