@@ -1,7 +1,9 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
+use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
 use rustix::net;
+use rustix::net::SocketAddrAny;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
 pub struct PingV4 {
@@ -18,6 +20,8 @@ pub enum LinuxError {
 
     SendtoFailed(String),
     RecvFailed(String),
+
+    MissRespondAddr,
 }
 
 impl PingV4 {
@@ -26,7 +30,10 @@ impl PingV4 {
         Self { builder }
     }
 
-    pub fn ping(&self, target: Ipv4Addr) -> Result<std::time::Duration, PingError> {
+    fn get_reply(
+        &self,
+        target: Ipv4Addr,
+    ) -> Result<(std::time::Duration, Option<SocketAddrAny>), PingError> {
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET,
@@ -82,12 +89,30 @@ impl PingV4 {
         .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
 
         loop {
-            net::recv(&sock, &mut buff, net::RecvFlags::empty())
+            let result = net::recvfrom(&sock, &mut buff, net::RecvFlags::DONTWAIT)
                 .map_err(|e| solve_recv_error(e))?;
             let duration = std::time::Instant::now().duration_since(start_time);
             if buff[6..].eq(&sent[6..]) {
-                return Ok(duration);
+                return Ok((duration, result.1));
             }
+        }
+    }
+
+    #[inline]
+    pub fn ping(&self, target: Ipv4Addr) -> Result<std::time::Duration, PingError> {
+        Ok(self.get_reply(target)?.0)
+    }
+
+    #[inline]
+    pub fn ping_in_detail(&self, target: Ipv4Addr) -> Result<PingV4Result, PingError> {
+        let res = self.get_reply(target)?;
+        if let Some(SocketAddrAny::V4(addr)) = res.1 {
+            Ok(PingV4Result {
+                ip: *addr.ip(),
+                duration: res.0,
+            })
+        } else {
+            Err(LinuxError::MissRespondAddr.into())
         }
     }
 }
@@ -98,8 +123,10 @@ impl PingV6 {
         Self { builder }
     }
 
-    #[inline]
-    pub fn ping(&self, target: Ipv6Addr) -> Result<std::time::Duration, PingError> {
+    fn get_reply(
+        &self,
+        target: Ipv6Addr,
+    ) -> Result<(std::time::Duration, Option<SocketAddrAny>), PingError> {
         #[cfg(feature = "DGRAM_SOCKET")]
         let sock = net::socket(
             net::AddressFamily::INET6,
@@ -158,12 +185,30 @@ impl PingV6 {
         .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
 
         loop {
-            net::recv(&sock, &mut buff, net::RecvFlags::empty())
+            let result = net::recvfrom(&sock, &mut buff, net::RecvFlags::empty())
                 .map_err(|e| solve_recv_error(e))?;
             let duration = std::time::Instant::now().duration_since(start_time);
             if buff[6..].eq(&sent[6..]) {
-                return Ok(duration);
+                return Ok((duration, result.1));
             }
+        }
+    }
+
+    #[inline]
+    pub fn ping(&self, target: Ipv6Addr) -> Result<std::time::Duration, PingError> {
+        Ok(self.get_reply(target)?.0)
+    }
+
+    #[inline]
+    pub fn ping_in_detail(&self, target: Ipv6Addr) -> Result<PingV6Result, PingError> {
+        let res = self.get_reply(target)?;
+        if let Some(SocketAddrAny::V6(addr)) = res.1 {
+            Ok(PingV6Result {
+                ip: *addr.ip(),
+                duration: res.0,
+            })
+        } else {
+            Err(LinuxError::MissRespondAddr.into())
         }
     }
 }
@@ -246,7 +291,7 @@ mod tests {
     fn test_ping_v4() {
         let ping: PingV4 = PingV4Builder {
             timeout: 1000,
-            ttl: Some(50),
+            ttl: Some(5),
             bind_addr: None,
         }
         .into();
@@ -260,6 +305,24 @@ mod tests {
     }
 
     #[test]
+    fn test_ping_in_detail() {
+        let ping = PingV4Builder {
+            timeout: 200,
+            ttl: Some(10),
+            bind_addr: None,
+        }
+        .build();
+        let result = ping
+            .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
+            .expect("ping_v4_in_detail error");
+        println!(
+            "{},{}",
+            result.ip,
+            result.duration.as_micros() as f64 / 1000.0
+        );
+    }
+
+    #[test]
     fn test_ping_v6() {
         let ping: PingV6 = PingV6Builder::default().into();
         println!(
@@ -268,6 +331,25 @@ mod tests {
                 .expect("ping_v6 error")
                 .as_micros() as f64
                 / 1000.0
+        );
+    }
+
+    #[test]
+    fn test_ping_v6_in_detail() {
+        let ping = PingV6Builder {
+            timeout: 200,
+            ttl: Some(5),
+            bind_addr: None,
+            scope_id_option: None,
+        }
+        .build();
+        let result = ping
+            .ping_in_detail("2606:4700:4700::1111".parse().unwrap())
+            .expect("ping_v6_in_detail error");
+        println!(
+            "{},{}",
+            result.ip,
+            result.duration.as_micros() as f64 / 1000.0
         );
     }
 }

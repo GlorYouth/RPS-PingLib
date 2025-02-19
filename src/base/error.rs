@@ -57,6 +57,9 @@ impl std::fmt::Debug for PingError {
                 LinuxError::RecvFailed(str) => {
                     write!(f, "PingError::LinuxError(RecvFailed): {}", str)
                 }
+                LinuxError::MissRespondAddr => {
+                    write!(f, "PingError::LinuxError(MissRespondAddr)")
+                }
             },
         }
     }
@@ -107,6 +110,9 @@ impl std::fmt::Display for PingError {
                 }
                 LinuxError::RecvFailed(str) => {
                     write!(f, "failed to receive message from socket: {}", str)
+                }
+                LinuxError::MissRespondAddr => {
+                    write!(f, "query target address failed")
                 }
             },
         }
