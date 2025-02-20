@@ -102,6 +102,11 @@ impl<'a> SliceReader<'a> {
     }
 
     #[inline]
+    pub fn remainder(&mut self) -> &'a [u8] {
+        self.read_slice(self.len() - self.pos)
+    }
+
+    #[inline]
     pub fn from_slice(slice: &'a [u8]) -> Self {
         SliceReader { slice, pos: 0 }
     }

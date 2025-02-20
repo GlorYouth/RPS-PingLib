@@ -6,7 +6,7 @@ fn main() {
         ttl: Some(20),
         bind_addr: None,
     }
-        .build();
+    .build();
     let result = ping
         .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
         .expect("ping_v4_in_detail error");

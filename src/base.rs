@@ -6,11 +6,11 @@ pub use linux::PingV4;
 #[cfg(not(target_os = "windows"))]
 pub use linux::PingV6;
 mod builder;
+mod protocol;
 mod result;
+mod utils;
 #[cfg(target_os = "windows")]
 mod windows;
-mod utils;
-mod protocol;
 
 pub use result::*;
 

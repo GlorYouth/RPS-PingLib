@@ -1,13 +1,13 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
+use crate::base::protocol::Ipv4Header;
+use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
 use libc::{sockaddr, sockaddr_in};
 use rand::Rng;
 use rustix::net;
 use rustix::net::SocketAddrAny;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
-use crate::base::protocol::Ipv4Header;
-use crate::base::utils::SliceReader;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -27,18 +27,13 @@ pub enum LinuxError {
     MissRespondAddr,
 }
 
-
-
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> Self {
         Self { builder }
     }
 
-    fn get_reply(
-        &self,
-        target: Ipv4Addr,
-    ) -> Result<(std::time::Duration, Ipv4Addr), PingError> {
+    fn get_reply(&self, target: Ipv4Addr) -> Result<(std::time::Duration, Ipv4Addr), PingError> {
         unsafe {
             let sock = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP);
             if sock == -1 {
@@ -121,22 +116,25 @@ impl PingV4 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE + PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE];
             {
-                let err = libc::recv(
+                let len = libc::recv(
                     sock,
                     buff.as_mut_ptr() as *mut _,
-                    Ipv4Header::FIXED_HEADER_SIZE + PingICMP::DATA_SIZE,
+                    Ipv4Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE,
                     0,
                 );
                 let duration = std::time::Instant::now().duration_since(start_time);
-                if err == -1 {
+                if len == -1 {
                     println!("{:?}", *libc::__errno_location());
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
                 }
                 let mut reader = SliceReader::from_slice(buff.as_ref());
-                let header = Ipv4Header::from_reader(&mut reader);
-                Ok((duration,header.get_source_address()))
+                let header = Ipv4Header::from_reader(&mut reader, len as u16);
+                match header {
+                    Some(header) => Ok((duration, header.get_source_address())),
+                    None => Err(LinuxError::MissRespondAddr.into()),
+                }
             }
         }
     }
