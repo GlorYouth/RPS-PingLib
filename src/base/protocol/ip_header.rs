@@ -1,5 +1,6 @@
 use crate::base::utils::SliceReader;
 
+#[derive(Debug)]
 pub struct Ipv4Header<'a> {
     fix_slice: &'a [u8],
     op_slice: &'a [u8], // 可选数据
@@ -11,22 +12,22 @@ impl<'a> Ipv4Header<'a> {
 
     pub fn from_reader<'b: 'a>(
         reader: &mut SliceReader<'b>,
-        total_len: u16,
+        received_total_len: u16,
     ) -> Option<Ipv4Header<'a>> {
-        if reader.len() < total_len as usize || total_len < Self::FIXED_HEADER_SIZE {
+        if reader.len() < received_total_len as usize {
             return None;
         }
-        let header_length = (reader.peek_u8() << 4) >> 4;
-        let payload_length = u16::from_be_bytes(reader.as_ref()[2..4].try_into().unwrap());
-        if payload_length != total_len - Self::FIXED_HEADER_SIZE - header_length as u16
-            || reader.len() > (payload_length as usize + header_length as usize)
+        let header_length = (reader.peek_u8() << 4) >> 2;
+        let total_length = u16::from_be_bytes(reader.as_ref()[2..4].try_into().unwrap());
+
+        if received_total_len != total_length
         {
             return None;
         }
         Some(Ipv4Header {
             fix_slice: reader.read_slice(Self::FIXED_HEADER_SIZE as usize),
             op_slice: reader.read_slice(header_length as usize - Self::FIXED_HEADER_SIZE as usize),
-            payload_slice: reader.read_slice(payload_length as usize),
+            payload_slice: reader.read_slice(total_length as usize - header_length as usize),
         })
     }
 
@@ -180,7 +181,18 @@ mod tests {
     use crate::base::protocol::ip_header::Ipv6Header;
     use crate::base::utils::SliceReader;
     use std::str::FromStr;
+    use crate::base::protocol::Ipv4Header;
 
+    #[test]
+    fn test_ipv4_header() {
+        let slice: &[u8] = &[69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6, 0, 0, 136, 240, 0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158, 115, 102, 178];
+        let mut reader = SliceReader::from_slice(&slice);
+        let header = Ipv4Header::from_reader(&mut reader, slice.len() as u16).unwrap();
+        assert_eq!(header.fix_slice, [69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6]);
+        assert_eq!(header.op_slice, []);
+        assert_eq!(header.payload_slice, [0, 0, 136, 240, 0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158, 115, 102, 178]);
+    }
+    
     #[test]
     fn test_ipv6_header() {
         let slice = [

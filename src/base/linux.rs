@@ -1,13 +1,11 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::protocol::Ipv4Header;
+use crate::base::protocol::{Ipv4Header, Ipv6Header};
 use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
-use libc::{sockaddr, sockaddr_in};
+use libc::{in6_addr, sockaddr, sockaddr_in, sockaddr_in6};
 use rand::Rng;
-use rustix::net;
-use rustix::net::SocketAddrAny;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -163,70 +161,94 @@ impl PingV6 {
     fn get_reply(
         &self,
         target: Ipv6Addr,
-    ) -> Result<(std::time::Duration, Option<SocketAddrAny>), PingError> {
-        #[cfg(feature = "DGRAM_SOCKET")]
-        let sock = net::socket(
-            net::AddressFamily::INET6,
-            #[cfg(feature = "DGRAM_SOCKET")]
-            net::SocketType::DGRAM,
-            Some(net::ipproto::ICMPV6),
-        )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
-        #[cfg(not(feature = "DGRAM_SOCKET"))]
-        let sock = net::socket(
-            net::AddressFamily::INET6,
-            #[cfg(not(feature = "DGRAM_SOCKET"))]
-            net::SocketType::RAW,
-            Some(net::ipproto::ICMPV6),
-        )
-        .map_err(|e| LinuxError::SocketSetupFailed(e.to_string()))?;
-
-        net::sockopt::set_socket_timeout(
-            &sock,
-            net::sockopt::Timeout::Recv,
-            Some(std::time::Duration::from_millis(
-                self.builder.timeout.into(),
-            )),
-        )
-        .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
-
-        match self.builder.ttl {
-            None => {}
-            Some(ttl) => {
-                net::sockopt::set_ip_ttl(&sock, ttl as u32)
-                    .map_err(|e| LinuxError::SetSockOptError(e.to_string()))?;
+    ) -> Result<(std::time::Duration, std::net::Ipv6Addr), PingError> {
+        unsafe {
+            let sock = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6);
+            if sock == -1 {
+                return Err(LinuxError::SocketSetupFailed((*libc::__errno_location()).to_string()).into());
             }
-        }
 
-        match self.builder.bind_addr {
-            Some(addr) => {
-                net::bind_v6(
-                    &sock,
-                    &SocketAddrV6::new(addr, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
-                )
-                .map_err(|e| SharedError::BindError(e.to_string()))?;
+            {
+                let millis = self.builder.timeout;
+                let timeval = libc::timeval {
+                    tv_sec: (millis / 1000) as libc::time_t,
+                    tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
+                };
+                let err = libc::setsockopt(
+                    sock,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVTIMEO_NEW,
+                    &timeval as *const _ as *const libc::c_void,
+                    size_of_val(&timeval) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(LinuxError::SetSockOptError(err.to_string()).into());
+                }
             }
-            None => {}
-        }
 
-        let sent = PingICMP::new(128).data;
-        let mut buff = [0_u8; PingICMP::DATA_SIZE];
-        let start_time = std::time::Instant::now();
+            {
+                let sock_addr = sockaddr_in6 {
+                    sin6_family: libc::AF_INET6 as u16,
+                    sin6_port: 0,
+                    sin6_flowinfo: 0,
+                    sin6_addr: in6_addr {
+                        s6_addr: Default::default(),
+                    },
+                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+                };
 
-        net::sendto_v6(
-            &sock,
-            &sent,
-            net::SendFlags::empty(),
-            &SocketAddrV6::new(target, 0, 0, self.builder.scope_id_option.unwrap_or(0)),
-        )
-        .map_err(|e| LinuxError::SendtoFailed(e.to_string()))?;
+                let err = libc::bind(
+                    sock,
+                    &sock_addr as *const _ as *const sockaddr,
+                    size_of_val(&sock_addr) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(SharedError::BindError(err.to_string()).into());
+                }
+            }
+            
+            let sent = PingICMP::new(8).data;
+            {
+                let addr = sockaddr_in6 {
+                    sin6_family: libc::AF_INET6 as u16,
+                    sin6_port: 0,
+                    sin6_flowinfo: 0,
+                    sin6_addr: std::mem::transmute(target),
+                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+                };
+                let err = libc::sendto(
+                    sock,
+                    sent.as_ptr() as *const _,
+                    PingICMP::DATA_SIZE,
+                    0,
+                    &addr as *const _ as *const sockaddr,
+                    size_of_val(&addr) as libc::socklen_t,
+                );
+                if err == -1 {
+                    return Err(LinuxError::SendtoFailed(sock.to_string()).into());
+                }
+            }
+            let start_time = std::time::Instant::now();
 
-        loop {
-            let result = net::recvfrom(&sock, &mut buff, net::RecvFlags::empty())
-                .map_err(|e| solve_recv_error(e))?;
-            let duration = std::time::Instant::now().duration_since(start_time);
-            if buff[6..].eq(&sent[6..]) {
-                return Ok((duration, result.1));
+            let mut buff = [0_u8; Ipv6Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE];
+            {
+                let len = libc::recv(
+                    sock,
+                    buff.as_mut_ptr() as *mut _,
+                    Ipv6Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE,
+                    0,
+                );
+                let duration = std::time::Instant::now().duration_since(start_time);
+                if len == -1 {
+                    println!("{:?}", *libc::__errno_location());
+                    return Err(LinuxError::RecvFailed(sock.to_string()).into());
+                }
+                let mut reader = SliceReader::from_slice(buff.as_ref());
+                let header = Ipv6Header::from_reader(&mut reader, len as u16);
+                match header {
+                    Some(header) => Ok((duration, header.get_source_address())),
+                    None => Err(LinuxError::MissRespondAddr.into()),
+                }
             }
         }
     }
@@ -239,14 +261,10 @@ impl PingV6 {
     #[inline]
     pub fn ping_in_detail(&self, target: Ipv6Addr) -> Result<PingV6Result, PingError> {
         let res = self.get_reply(target)?;
-        if let Some(SocketAddrAny::V6(addr)) = res.1 {
-            Ok(PingV6Result {
-                ip: *addr.ip(),
-                duration: res.0,
-            })
-        } else {
-            Err(LinuxError::MissRespondAddr.into())
-        }
+        Ok(PingV6Result {
+            ip: res.1,
+            duration: res.0,
+        })
     }
 }
 
@@ -264,13 +282,6 @@ impl Into<PingV6> for PingV6Builder {
     }
 }
 
-fn solve_recv_error(error: rustix::io::Errno) -> PingError {
-    match error.to_owned().raw_os_error() {
-        11 => SharedError::Timeout.into(),
-        101 => SharedError::Unreachable.into(),
-        _ => LinuxError::RecvFailed(error.to_string()).into(),
-    }
-}
 
 struct PingICMP {
     data: [u8; PingICMP::DATA_SIZE],
