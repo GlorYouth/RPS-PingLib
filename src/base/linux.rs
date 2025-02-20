@@ -3,9 +3,7 @@ use crate::base::error::{PingError, SharedError};
 use crate::base::protocol::{Ipv4Header, Ipv6Header};
 use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
-use libc::{in6_addr, sockaddr, sockaddr_in, sockaddr_in6};
 use rand::Rng;
-use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -31,7 +29,10 @@ impl PingV4 {
         Self { builder }
     }
 
-    fn get_reply(&self, target: Ipv4Addr) -> Result<(std::time::Duration, Ipv4Addr), PingError> {
+    fn get_reply(
+        &self,
+        target: std::net::Ipv4Addr,
+    ) -> Result<(std::time::Duration, std::net::Ipv4Addr), PingError> {
         unsafe {
             let sock = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP);
             if sock == -1 {
@@ -57,7 +58,7 @@ impl PingV4 {
             }
 
             {
-                let sock_addr = sockaddr_in {
+                let sock_addr = libc::sockaddr_in {
                     sin_family: libc::AF_INET as u16,
                     sin_port: 0,
                     sin_addr: libc::in_addr { s_addr: 0 },
@@ -66,7 +67,7 @@ impl PingV4 {
 
                 let err = libc::bind(
                     sock,
-                    &sock_addr as *const _ as *const sockaddr,
+                    &sock_addr as *const _ as *const libc::sockaddr,
                     size_of_val(&sock_addr) as libc::socklen_t,
                 );
                 if err == -1 {
@@ -94,7 +95,7 @@ impl PingV4 {
 
             let sent = PingICMP::new(8).data;
             {
-                let addr = sockaddr_in {
+                let addr = libc::sockaddr_in {
                     sin_family: libc::AF_INET as u16,
                     sin_port: 0,
                     sin_addr: std::mem::transmute(target),
@@ -105,7 +106,7 @@ impl PingV4 {
                     sent.as_ptr() as *const _,
                     PingICMP::DATA_SIZE,
                     0,
-                    &addr as *const _ as *const sockaddr,
+                    &addr as *const _ as *const libc::sockaddr,
                     size_of_val(&addr) as libc::socklen_t,
                 );
                 if err == -1 {
@@ -138,12 +139,12 @@ impl PingV4 {
     }
 
     #[inline]
-    pub fn ping(&self, target: Ipv4Addr) -> Result<std::time::Duration, PingError> {
+    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
         Ok(self.get_reply(target)?.0)
     }
 
     #[inline]
-    pub fn ping_in_detail(&self, target: Ipv4Addr) -> Result<PingV4Result, PingError> {
+    pub fn ping_in_detail(&self, target: std::net::Ipv4Addr) -> Result<PingV4Result, PingError> {
         let res = self.get_reply(target)?;
         Ok(PingV4Result {
             ip: res.1,
@@ -160,12 +161,14 @@ impl PingV6 {
 
     fn get_reply(
         &self,
-        target: Ipv6Addr,
+        target: std::net::Ipv6Addr,
     ) -> Result<(std::time::Duration, std::net::Ipv6Addr), PingError> {
         unsafe {
             let sock = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6);
             if sock == -1 {
-                return Err(LinuxError::SocketSetupFailed((*libc::__errno_location()).to_string()).into());
+                return Err(
+                    LinuxError::SocketSetupFailed((*libc::__errno_location()).to_string()).into(),
+                );
             }
 
             {
@@ -187,11 +190,11 @@ impl PingV6 {
             }
 
             {
-                let sock_addr = sockaddr_in6 {
+                let sock_addr = libc::sockaddr_in6 {
                     sin6_family: libc::AF_INET6 as u16,
                     sin6_port: 0,
                     sin6_flowinfo: 0,
-                    sin6_addr: in6_addr {
+                    sin6_addr: libc::in6_addr {
                         s6_addr: Default::default(),
                     },
                     sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
@@ -199,17 +202,17 @@ impl PingV6 {
 
                 let err = libc::bind(
                     sock,
-                    &sock_addr as *const _ as *const sockaddr,
+                    &sock_addr as *const _ as *const libc::sockaddr,
                     size_of_val(&sock_addr) as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(SharedError::BindError(err.to_string()).into());
                 }
             }
-            
+
             let sent = PingICMP::new(8).data;
             {
-                let addr = sockaddr_in6 {
+                let addr = libc::sockaddr_in6 {
                     sin6_family: libc::AF_INET6 as u16,
                     sin6_port: 0,
                     sin6_flowinfo: 0,
@@ -221,7 +224,7 @@ impl PingV6 {
                     sent.as_ptr() as *const _,
                     PingICMP::DATA_SIZE,
                     0,
-                    &addr as *const _ as *const sockaddr,
+                    &addr as *const _ as *const libc::sockaddr,
                     size_of_val(&addr) as libc::socklen_t,
                 );
                 if err == -1 {
@@ -254,12 +257,12 @@ impl PingV6 {
     }
 
     #[inline]
-    pub fn ping(&self, target: Ipv6Addr) -> Result<std::time::Duration, PingError> {
+    pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
         Ok(self.get_reply(target)?.0)
     }
 
     #[inline]
-    pub fn ping_in_detail(&self, target: Ipv6Addr) -> Result<PingV6Result, PingError> {
+    pub fn ping_in_detail(&self, target: std::net::Ipv6Addr) -> Result<PingV6Result, PingError> {
         let res = self.get_reply(target)?;
         Ok(PingV6Result {
             ip: res.1,
@@ -281,7 +284,6 @@ impl Into<PingV6> for PingV6Builder {
         PingV6 { builder: self }
     }
 }
-
 
 struct PingICMP {
     data: [u8; PingICMP::DATA_SIZE],

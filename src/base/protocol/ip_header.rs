@@ -20,8 +20,7 @@ impl<'a> Ipv4Header<'a> {
         let header_length = (reader.peek_u8() << 4) >> 2;
         let total_length = u16::from_be_bytes(reader.as_ref()[2..4].try_into().unwrap());
 
-        if received_total_len != total_length
-        {
+        if received_total_len != total_length {
             return None;
         }
         Some(Ipv4Header {
@@ -178,21 +177,35 @@ impl Ipv6HeaderType {
 
 #[cfg(test)]
 mod tests {
+    use crate::base::protocol::Ipv4Header;
     use crate::base::protocol::ip_header::Ipv6Header;
     use crate::base::utils::SliceReader;
     use std::str::FromStr;
-    use crate::base::protocol::Ipv4Header;
 
     #[test]
     fn test_ipv4_header() {
-        let slice: &[u8] = &[69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6, 0, 0, 136, 240, 0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158, 115, 102, 178];
+        let slice: &[u8] = &[
+            69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6, 0, 0, 136, 240,
+            0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158, 115, 102, 178,
+        ];
         let mut reader = SliceReader::from_slice(&slice);
         let header = Ipv4Header::from_reader(&mut reader, slice.len() as u16).unwrap();
-        assert_eq!(header.fix_slice, [69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6]);
+        assert_eq!(
+            header.fix_slice,
+            [
+                69, 0, 0, 42, 133, 30, 0, 0, 55, 1, 58, 5, 1, 1, 1, 1, 192, 168, 2, 6
+            ]
+        );
         assert_eq!(header.op_slice, []);
-        assert_eq!(header.payload_slice, [0, 0, 136, 240, 0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158, 115, 102, 178]);
+        assert_eq!(
+            header.payload_slice,
+            [
+                0, 0, 136, 240, 0, 0, 230, 74, 163, 38, 61, 106, 234, 34, 235, 11, 213, 222, 158,
+                115, 102, 178
+            ]
+        );
     }
-    
+
     #[test]
     fn test_ipv6_header() {
         let slice = [
