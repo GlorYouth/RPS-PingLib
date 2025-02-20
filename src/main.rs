@@ -1,17 +1,18 @@
-use multi_ping::PingV4Builder;
+use multi_ping::PingV6Builder;
 
 fn main() {
-    let ping = PingV4Builder {
+    let ping = PingV6Builder {
         timeout: 200,
-        ttl: Some(20),
+        ttl: Some(100),
         bind_addr: None,
+        scope_id_option: None,
     }
-    .build();
+        .build();
     let result = ping
-        .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
-        .expect("ping_v4_in_detail error");
+        .ping_in_detail("2606:4700:4700::1111".parse().unwrap())
+        .expect("ping_v6_in_detail error");
     println!(
-        "{}, time: {}ms",
+        "{},{}",
         result.ip,
         result.duration.as_micros() as f64 / 1000.0
     );

@@ -1,6 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::protocol::{Ipv4Header, Ipv6Header};
+use crate::base::protocol::Ipv4Header;
 use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
@@ -189,6 +189,7 @@ impl PingV6 {
                 }
             }
 
+            let scope_id = self.builder.scope_id_option.unwrap_or(0);
             {
                 let sock_addr = libc::sockaddr_in6 {
                     sin6_family: libc::AF_INET6 as u16,
@@ -197,7 +198,7 @@ impl PingV6 {
                     sin6_addr: libc::in6_addr {
                         s6_addr: Default::default(),
                     },
-                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+                    sin6_scope_id: scope_id,
                 };
 
                 let err = libc::bind(
@@ -210,14 +211,14 @@ impl PingV6 {
                 }
             }
 
-            let sent = PingICMP::new(8).data;
+            let sent = PingICMP::new(128).data;
             {
                 let addr = libc::sockaddr_in6 {
                     sin6_family: libc::AF_INET6 as u16,
                     sin6_port: 0,
                     sin6_flowinfo: 0,
                     sin6_addr: std::mem::transmute(target),
-                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+                    sin6_scope_id: scope_id,
                 };
                 let err = libc::sendto(
                     sock,
@@ -233,12 +234,24 @@ impl PingV6 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; Ipv6Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; PingICMP::DATA_SIZE];
             {
-                let len = libc::recv(
+                let mut addr_v6  = std::mem::zeroed::<libc::sockaddr_in6>();
+                let mut iovec =  [
+                    libc::iovec{ iov_base: buff.as_mut_ptr() as *mut _, iov_len: PingICMP::DATA_SIZE }
+                ];
+                let mut msg = libc::msghdr {
+                    msg_name: &mut addr_v6 as *mut _ as *mut _,
+                    msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                    msg_iov: &mut iovec as *mut _ as *mut _,
+                    msg_iovlen: 1,
+                    msg_control: std::ptr::null_mut(),
+                    msg_controllen: 0,
+                    msg_flags: 0,
+                };
+                let len = libc::recvmsg(
                     sock,
-                    buff.as_mut_ptr() as *mut _,
-                    Ipv6Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE,
+                    &mut msg as *mut _ as *mut _,
                     0,
                 );
                 let duration = std::time::Instant::now().duration_since(start_time);
@@ -246,11 +259,10 @@ impl PingV6 {
                     println!("{:?}", *libc::__errno_location());
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
                 }
-                let mut reader = SliceReader::from_slice(buff.as_ref());
-                let header = Ipv6Header::from_reader(&mut reader, len as u16);
-                match header {
-                    Some(header) => Ok((duration, header.get_source_address())),
-                    None => Err(LinuxError::MissRespondAddr.into()),
+                if msg.msg_namelen == 0 {
+                    Err(LinuxError::MissRespondAddr.into())
+                } else {
+                    Ok((duration,std::net::Ipv6Addr::from(addr_v6.sin6_addr.s6_addr)))
                 }
             }
         }
