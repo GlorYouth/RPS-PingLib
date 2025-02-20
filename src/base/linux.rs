@@ -162,7 +162,7 @@ impl PingV6 {
     fn get_reply(
         &self,
         target: std::net::Ipv6Addr,
-    ) -> Result<(std::time::Duration, std::net::Ipv6Addr), PingError> {
+    ) -> Result<libc::c_int, PingError> {
         unsafe {
             let sock = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6);
             if sock == -1 {
@@ -229,40 +229,9 @@ impl PingV6 {
                     size_of_val(&addr) as libc::socklen_t,
                 );
                 if err == -1 {
-                    return Err(LinuxError::SendtoFailed(sock.to_string()).into());
-                }
-            }
-            let start_time = std::time::Instant::now();
-
-            let mut buff = [0_u8; PingICMP::DATA_SIZE];
-            {
-                let mut addr_v6  = std::mem::zeroed::<libc::sockaddr_in6>();
-                let mut iovec =  [
-                    libc::iovec{ iov_base: buff.as_mut_ptr() as *mut _, iov_len: PingICMP::DATA_SIZE }
-                ];
-                let mut msg = libc::msghdr {
-                    msg_name: &mut addr_v6 as *mut _ as *mut _,
-                    msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                    msg_iov: &mut iovec as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                };
-                let len = libc::recvmsg(
-                    sock,
-                    &mut msg as *mut _ as *mut _,
-                    0,
-                );
-                let duration = std::time::Instant::now().duration_since(start_time);
-                if len == -1 {
-                    println!("{:?}", *libc::__errno_location());
-                    return Err(LinuxError::RecvFailed(sock.to_string()).into());
-                }
-                if msg.msg_namelen == 0 {
-                    Err(LinuxError::MissRespondAddr.into())
+                    Err(LinuxError::SendtoFailed(sock.to_string()).into())
                 } else {
-                    Ok((duration,std::net::Ipv6Addr::from(addr_v6.sin6_addr.s6_addr)))
+                    Ok(sock)
                 }
             }
         }
@@ -270,16 +239,65 @@ impl PingV6 {
 
     #[inline]
     pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
-        Ok(self.get_reply(target)?.0)
+        let sock = self.get_reply(target)?;
+        let start_time = std::time::Instant::now();
+
+        let mut buff = [0_u8; PingICMP::DATA_SIZE];
+        unsafe {
+            let len = libc::recv(
+                sock,
+                buff.as_mut_ptr() as *mut _,
+                PingICMP::DATA_SIZE,
+                0,
+            );
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                return Err(LinuxError::RecvFailed(sock.to_string()).into());
+            }
+            Ok(duration)
+        }
     }
 
     #[inline]
     pub fn ping_in_detail(&self, target: std::net::Ipv6Addr) -> Result<PingV6Result, PingError> {
-        let res = self.get_reply(target)?;
-        Ok(PingV6Result {
-            ip: res.1,
-            duration: res.0,
-        })
+        let sock = self.get_reply(target)?;
+        let start_time = std::time::Instant::now();
+
+        let mut buff = [0_u8; PingICMP::DATA_SIZE];
+        unsafe {
+            let mut addr_v6  = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
+            let mut iovec =  [
+                libc::iovec{ iov_base: buff.as_mut_ptr() as *mut _, iov_len: PingICMP::DATA_SIZE }
+            ];
+            let mut msg = libc::msghdr {
+                msg_name: addr_v6.as_mut_ptr() as *mut _,
+                msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                msg_iov: &mut iovec as *mut _ as *mut _,
+                msg_iovlen: 1,
+                msg_control: std::ptr::null_mut(),
+                msg_controllen: 0,
+                msg_flags: 0,
+            };
+            let len = libc::recvmsg(
+                sock,
+                &mut msg as *mut _ as *mut _,
+                0,
+            );
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                println!("{:?}", *libc::__errno_location());
+                return Err(LinuxError::RecvFailed(sock.to_string()).into());
+            }
+            if msg.msg_namelen == 0 {
+                return Err(LinuxError::MissRespondAddr.into());
+            }
+            Ok(PingV6Result {
+                ip: std::net::Ipv6Addr::from(addr_v6.assume_init().sin6_addr.s6_addr),
+                duration,
+            })
+        }
+        
+        
     }
 }
 

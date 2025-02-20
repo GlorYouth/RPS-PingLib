@@ -9,11 +9,10 @@ fn main() {
     }
         .build();
     let result = ping
-        .ping_in_detail("2606:4700:4700::1111".parse().unwrap())
+        .ping("2606:4700:4700::1111".parse().unwrap())
         .expect("ping_v6_in_detail error");
     println!(
-        "{},{}",
-        result.ip,
-        result.duration.as_micros() as f64 / 1000.0
+        "{}",
+        result.as_micros() as f64 / 1000.0
     );
 }
