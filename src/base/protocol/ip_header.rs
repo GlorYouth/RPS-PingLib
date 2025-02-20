@@ -30,31 +30,37 @@ impl<'a> Ipv4Header<'a> {
         })
     }
 
+    #[inline]
     pub fn get_type(&self) -> u8 {
         self.fix_slice[1]
     }
 
+    #[inline]
     fn get_payload_length(&self) -> u16 {
         u16::from_be_bytes(self.fix_slice[2..4].try_into().unwrap())
     }
 
+    #[inline]
     pub fn get_source_address(&self) -> std::net::Ipv4Addr {
         std::net::Ipv4Addr::from(
             <&[u8] as TryInto<[u8; 4]>>::try_into(&self.fix_slice[12..16]).unwrap(),
         )
     }
 
+    #[inline]
     pub fn get_destination_address(&self) -> std::net::Ipv4Addr {
         std::net::Ipv4Addr::from(
             <&[u8] as TryInto<[u8; 4]>>::try_into(&self.fix_slice[16..20]).unwrap(),
         )
     }
 
+    #[inline]
     pub fn get_payload(&self) -> &'a [u8] {
         self.payload_slice
     }
 }
 
+#[derive(Debug)]
 pub struct Ipv6Header<'a> {
     fix_slice: &'a [u8],
     payload_slice_vec: Vec<(u8, &'a [u8])>,
@@ -82,7 +88,10 @@ impl<'a> Ipv6Header<'a> {
                 Ipv6HeaderType::Options(u) => {
                     next_header_type = reader.peek_u8();
                     let length = reader.as_ref()[reader.pos() + 1];
-                    payload_slice_vec.push((u, reader.read_slice(length as usize)));
+                    payload_slice_vec.push((
+                        u,
+                        reader.read_slice(Self::alignment_u8_size(length) as usize),
+                    ));
                     continue;
                 }
                 Ipv6HeaderType::Uppers(_) => {
@@ -97,6 +106,37 @@ impl<'a> Ipv6Header<'a> {
                 | Ipv6HeaderType::Reserved(_) => return None,
             }
         }
+    }
+
+    fn alignment_u8_size(u: u8) -> u8 {
+        if u == 0 {
+            return 8;
+        }
+        let (divisor, is_reminder) = (u >> 3, u & 0b111 > 0);
+        if is_reminder { (divisor + 1) << 3 } else { u }
+    }
+
+    #[inline]
+    pub fn get_source_address(&self) -> std::net::Ipv6Addr {
+        std::net::Ipv6Addr::from(
+            <&[u8] as TryInto<[u8; 16]>>::try_into(&self.fix_slice[8..24]).unwrap(),
+        )
+    }
+
+    #[inline]
+    pub fn get_destination_address(&self) -> std::net::Ipv6Addr {
+        std::net::Ipv6Addr::from(
+            <&[u8] as TryInto<[u8; 16]>>::try_into(&self.fix_slice[24..40]).unwrap(),
+        )
+    }
+
+    #[inline]
+    pub fn get_type(&self) -> Option<u8> {
+        Some(self.payload_slice_vec.last()?.0)
+    }
+    #[inline]
+    pub fn get_payload(&self) -> Option<&'a [u8]> {
+        Some(self.payload_slice_vec.last()?.1)
     }
 }
 
@@ -132,5 +172,54 @@ impl Ipv6HeaderType {
                 255.. => Ipv6HeaderType::Reserved(u),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::base::protocol::ip_header::Ipv6Header;
+    use crate::base::utils::SliceReader;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_ipv6_header() {
+        let slice = [
+            0x60, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x01, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0x02, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x3a, 0x00,
+            0x01, 0x00, 0x05, 0x02, 0x00, 0x00, 0x82, 0x00, 0x80, 0x1d, 0x00, 0x0a, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
+        ];
+        let mut reader = SliceReader::from_slice(&slice);
+        let header = Ipv6Header::from_reader(&mut reader, slice.len() as u16).unwrap();
+        assert_eq!(
+            header.fix_slice,
+            &[
+                96, 0, 0, 0, 0, 32, 0, 1, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 255,
+                2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+            ]
+        );
+        assert_eq!(
+            header.payload_slice_vec[0],
+            (0, &[58, 0, 1, 0, 5, 2, 0, 0][..])
+        );
+        assert_eq!(
+            header.payload_slice_vec[1],
+            (
+                58,
+                &[
+                    130, 0, 128, 29, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                ][..]
+            )
+        );
+        assert_eq!(
+            header.get_source_address(),
+            std::net::Ipv6Addr::from_str("fe80::1").unwrap()
+        );
+        assert_eq!(
+            header.get_destination_address(),
+            std::net::Ipv6Addr::from_str("ff02::1").unwrap()
+        );
     }
 }

@@ -177,5 +177,6 @@ mod tests {
         assert_eq!(reader.pos(), 5);
         assert_eq!(reader.read_slice(4), &slice[5..9]);
         assert_eq!(reader.pos(), 9);
+        assert_eq!(reader.remainder(), &slice[9..]);
     }
 }
