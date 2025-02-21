@@ -7,12 +7,9 @@ fn main() {
         bind_addr: None,
         scope_id_option: None,
     }
-        .build();
+    .build();
     let result = ping
         .ping("2606:4700:4700::1111".parse().unwrap())
         .expect("ping_v6_in_detail error");
-    println!(
-        "{}",
-        result.as_micros() as f64 / 1000.0
-    );
+    println!("{}", result.as_micros() as f64 / 1000.0);
 }
