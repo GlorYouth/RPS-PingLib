@@ -1,6 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::protocol::Ipv4Header;
+use crate::base::protocol::{IcmpDataForPing, Ipv4Header};
 use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
@@ -96,7 +96,7 @@ impl PingV4 {
                 }
             }
 
-            let sent = PingICMP::new(8).data;
+            let sent = IcmpDataForPing::new_ping_v4().into_inner();
             {
                 let addr = libc::sockaddr_in {
                     sin_family: libc::AF_INET as u16,
@@ -107,7 +107,7 @@ impl PingV4 {
                 let err = libc::sendto(
                     sock,
                     sent.as_ptr() as *const _,
-                    PingICMP::DATA_SIZE,
+                    IcmpDataForPing::DATA_SIZE,
                     0,
                     &addr as *const _ as *const libc::sockaddr,
                     size_of_val(&addr) as libc::socklen_t,
@@ -118,12 +118,12 @@ impl PingV4 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE as usize + Ipv4Header::FIXED_HEADER_SIZE as usize + IcmpDataForPing::DATA_SIZE];
             {
                 let len = libc::recv(
                     sock,
                     buff.as_mut_ptr() as *mut _,
-                    Ipv4Header::FIXED_HEADER_SIZE as usize + PingICMP::DATA_SIZE,
+                    100,
                     0,
                 );
                 let duration = std::time::Instant::now().duration_since(start_time);
@@ -131,6 +131,7 @@ impl PingV4 {
                     println!("{:?}", *libc::__errno_location());
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
                 }
+                println!("{:?}", buff);
                 let mut reader = SliceReader::from_slice(buff.as_ref());
                 let header = Ipv4Header::from_reader(&mut reader, len as u16);
                 match header {
@@ -237,19 +238,19 @@ impl PingV6 {
                 }
             }
 
-            let sent = PingICMP::new(128).data;
+            let sent = IcmpDataForPing::new_ping_v6().into_inner();
             {
                 let err =
-                    libc::send(sock, sent.as_ptr() as *const _, PingICMP::DATA_SIZE, 0);
+                    libc::send(sock, sent.as_ptr() as *const _, IcmpDataForPing::DATA_SIZE, 0);
                 if err == -1 {
                     return Err(LinuxError::SendFailed(sock.to_string()).into());
                 }
             }
             let start_time = std::time::Instant::now();
             
-            let mut buff = [0_u8; PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
             {
-                let len = libc::recv(sock, buff.as_mut_ptr() as *mut _, PingICMP::DATA_SIZE, 0);
+                let len = libc::recv(sock, buff.as_mut_ptr() as *mut _, IcmpDataForPing::DATA_SIZE, 0);
                 let duration = std::time::Instant::now().duration_since(start_time);
                 if len == -1 {
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
@@ -265,7 +266,7 @@ impl PingV6 {
 
         unsafe {
             {
-                let sent = PingICMP::new(128).data;
+                let sent = IcmpDataForPing::new_ping_v6().into_inner();
                 {
                     let addr = libc::sockaddr_in6 {
                         sin6_family: libc::AF_INET6 as u16,
@@ -277,7 +278,7 @@ impl PingV6 {
                     let err = libc::sendto(
                         sock,
                         sent.as_ptr() as *const _,
-                        PingICMP::DATA_SIZE,
+                        IcmpDataForPing::DATA_SIZE,
                         0,
                         &addr as *const _ as *const libc::sockaddr,
                         size_of_val(&addr) as libc::socklen_t,
@@ -289,12 +290,12 @@ impl PingV6 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; PingICMP::DATA_SIZE];
+            let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
             {
                 let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
                 let mut iovec = [libc::iovec {
                     iov_base: buff.as_mut_ptr() as *mut _,
-                    iov_len: PingICMP::DATA_SIZE,
+                    iov_len: IcmpDataForPing::DATA_SIZE,
                 }];
                 let mut msg = libc::msghdr {
                     msg_name: addr_v6.as_mut_ptr() as *mut _,
@@ -337,52 +338,6 @@ impl Into<PingV6> for PingV6Builder {
     }
 }
 
-struct PingICMP {
-    data: [u8; PingICMP::DATA_SIZE],
-}
-
-impl PingICMP {
-    const DATA_SIZE: usize = 22;
-
-    fn new(icmp_type: u8) -> Self {
-        let request_data: u128 = rand::rng().random();
-
-        let mut data = [0_u8; Self::DATA_SIZE];
-        data[0] = icmp_type;
-        data[6..].copy_from_slice(&request_data.to_be_bytes());
-
-        let mut sum: u32 = 0;
-        let mut i = 0;
-        while i < PingICMP::DATA_SIZE {
-            // 取出每两个字节，拼接成16位
-            let word = if i + 1 < PingICMP::DATA_SIZE {
-                // 如果有两个字节，拼接成一个16位字
-                ((data[i] as u16) << 8) | (data[i + 1] as u16)
-            } else {
-                // 如果只剩一个字节，拼接成一个16位字，低8位为0
-                (data[i] as u16) << 8
-            };
-
-            // 累加到sum中
-            sum += word as u32;
-
-            // 如果有溢出，进位加回
-            if sum > 0xFFFF {
-                sum = (sum & 0xFFFF) + 1;
-            }
-
-            i += 2;
-        }
-        data[2..4].copy_from_slice(&(!(sum as u16)).to_be_bytes());
-
-        PingICMP { data }
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        self.data.as_ref()
-    }
-}
 
 #[cfg(test)]
 mod tests {
