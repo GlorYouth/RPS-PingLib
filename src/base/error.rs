@@ -51,12 +51,21 @@ impl std::fmt::Debug for PingError {
                 LinuxError::SetSockOptError(str) => {
                     write!(f, "PingError::LinuxError(SetSockOptError): {}", str)
                 }
+                
+                LinuxError::ConnectFailed(str) => {
+                    write!(f, "PingError::LinuxError(ConnectFailed): {}", str)
+                }
+                LinuxError::SendFailed(str) => {
+                    write!(f, "PingError::LinuxError(SendFailed): {}", str)
+                }
+                
                 LinuxError::SendtoFailed(str) => {
                     write!(f, "PingError::LinuxError(SendFailed): {}", str)
                 }
                 LinuxError::RecvFailed(str) => {
                     write!(f, "PingError::LinuxError(RecvFailed): {}", str)
                 }
+                
                 LinuxError::MissRespondAddr => {
                     write!(f, "PingError::LinuxError(MissRespondAddr)")
                 }
@@ -105,12 +114,21 @@ impl std::fmt::Display for PingError {
                 LinuxError::SetSockOptError(str) => {
                     write!(f, "failed to set socket option: {}", str)
                 }
+                
+                LinuxError::ConnectFailed(str) => {
+                    write!(f, "failed to connect socket: {}", str)
+                }
+                LinuxError::SendFailed(str) => {
+                    write!(f, "failed to send message: {}", str)
+                }
+                
                 LinuxError::SendtoFailed(str) => {
                     write!(f, "failed to send message to socket: {}", str)
                 }
                 LinuxError::RecvFailed(str) => {
                     write!(f, "failed to receive message from socket: {}", str)
                 }
+                
                 LinuxError::MissRespondAddr => {
                     write!(f, "query target address failed")
                 }
