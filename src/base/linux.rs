@@ -1,6 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::protocol::{IcmpDataForPing, Ipv4Header};
+use crate::base::protocol::{IcmpDataForPing, IcmpFormat, Ipv4Header};
 use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
@@ -96,7 +96,7 @@ impl PingV4 {
                 }
             }
 
-            let sent = IcmpDataForPing::new_ping_v4().into_inner();
+            let sent = IcmpDataForPing::new_ping_v4();
             {
                 let addr = libc::sockaddr_in {
                     sin_family: libc::AF_INET as u16,
@@ -106,7 +106,7 @@ impl PingV4 {
                 };
                 let err = libc::sendto(
                     sock,
-                    sent.as_ptr() as *const _,
+                    sent.get_inner().as_ptr() as *const _,
                     IcmpDataForPing::DATA_SIZE,
                     0,
                     &addr as *const _ as *const libc::sockaddr,
@@ -118,23 +118,20 @@ impl PingV4 {
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; Ipv4Header::FIXED_HEADER_SIZE as usize + Ipv4Header::FIXED_HEADER_SIZE as usize + IcmpDataForPing::DATA_SIZE];
+            let mut buff = [0_u8; 100];
             {
-                let len = libc::recv(
-                    sock,
-                    buff.as_mut_ptr() as *mut _,
-                    100,
-                    0,
-                );
+                let len = libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0);
                 let duration = std::time::Instant::now().duration_since(start_time);
                 if len == -1 {
                     println!("{:?}", *libc::__errno_location());
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
                 }
-                println!("{:?}", buff);
                 let mut reader = SliceReader::from_slice(buff.as_ref());
-                let header = Ipv4Header::from_reader(&mut reader, len as u16);
-                match header {
+                match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
+                    let format = IcmpFormat::from_header_v4(&header)?;
+                    format.check_is_correspond_v4(&sent)?;
+                    Some(header)
+                }) {
                     Some(header) => Ok((duration, header.get_source_address())),
                     None => Err(LinuxError::MissRespondAddr.into()),
                 }
@@ -240,17 +237,26 @@ impl PingV6 {
 
             let sent = IcmpDataForPing::new_ping_v6().into_inner();
             {
-                let err =
-                    libc::send(sock, sent.as_ptr() as *const _, IcmpDataForPing::DATA_SIZE, 0);
+                let err = libc::send(
+                    sock,
+                    sent.as_ptr() as *const _,
+                    IcmpDataForPing::DATA_SIZE,
+                    0,
+                );
                 if err == -1 {
                     return Err(LinuxError::SendFailed(sock.to_string()).into());
                 }
             }
             let start_time = std::time::Instant::now();
-            
+
             let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
             {
-                let len = libc::recv(sock, buff.as_mut_ptr() as *mut _, IcmpDataForPing::DATA_SIZE, 0);
+                let len = libc::recv(
+                    sock,
+                    buff.as_mut_ptr() as *mut _,
+                    IcmpDataForPing::DATA_SIZE,
+                    0,
+                );
                 let duration = std::time::Instant::now().duration_since(start_time);
                 if len == -1 {
                     return Err(LinuxError::RecvFailed(sock.to_string()).into());
@@ -337,7 +343,6 @@ impl Into<PingV6> for PingV6Builder {
         PingV6 { builder: self }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

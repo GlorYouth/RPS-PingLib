@@ -29,25 +29,40 @@ impl<'a> Ipv4Header<'a> {
             payload_slice: reader.read_slice(total_length as usize - header_length as usize),
         })
     }
-    
+
     pub fn from_slice<'b: 'a>(slice: &'b [u8]) -> Option<Ipv4Header<'a>> {
         if slice.len() < Ipv4Header::FIXED_HEADER_SIZE as usize {
             None
         } else {
             let header_length = (slice[0] << 4) >> 2;
             let total_length = u16::from_be_bytes(slice[2..4].try_into().unwrap());
-
-            if slice.len() != total_length as usize {
+            if slice.len() < total_length as usize {
                 return None;
             }
             Some(Ipv4Header {
                 fix_slice: &slice[0..Self::FIXED_HEADER_SIZE as usize],
                 op_slice: &slice[Self::FIXED_HEADER_SIZE as usize..header_length as usize],
-                payload_slice: &slice[header_length as usize..total_length as usize - header_length as usize],
+                payload_slice: &slice
+                    [header_length as usize..total_length as usize - header_length as usize],
             })
         }
     }
-    
+
+    pub fn from_slice_uncheck<'b: 'a>(slice: &'b [u8]) -> Option<Ipv4Header<'a>> {
+        if slice.len() < Ipv4Header::FIXED_HEADER_SIZE as usize {
+            None
+        } else {
+            let header_length = (slice[0] << 4) >> 2;
+            if slice.len() < header_length as usize {
+                return None;
+            }
+            Some(Ipv4Header {
+                fix_slice: &slice[0..Self::FIXED_HEADER_SIZE as usize],
+                op_slice: &slice[Self::FIXED_HEADER_SIZE as usize..header_length as usize],
+                payload_slice: &slice[header_length as usize..],
+            })
+        }
+    }
     #[inline]
     pub fn get_type(&self) -> u8 {
         self.fix_slice[1]
@@ -202,7 +217,10 @@ mod tests {
 
     #[test]
     fn test_ipv4_header() {
-        let slice: &[u8] = &[69, 0, 0, 96, 95, 124, 0, 0, 251, 1, 190, 189, 219, 158, 3, 22, 192, 168, 2, 6, 11, 0, 244, 238, 0, 17, 0, 0, 69, 0, 0, 42, 225, 217, 64, 0, 1, 1, 211, 73, 192, 168];
+        let slice: &[u8] = &[
+            69, 0, 0, 96, 95, 124, 0, 0, 251, 1, 190, 189, 219, 158, 3, 22, 192, 168, 2, 6, 11, 0,
+            244, 238, 0, 17, 0, 0, 69, 0, 0, 42, 225, 217, 64, 0, 1, 1, 211, 73, 192, 168,
+        ];
         let mut reader = SliceReader::from_slice(&slice);
         let header = Ipv4Header::from_reader(&mut reader, slice.len() as u16).unwrap();
         assert_eq!(

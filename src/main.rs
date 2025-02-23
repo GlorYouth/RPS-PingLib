@@ -3,10 +3,10 @@ use multi_ping::PingV4Builder;
 fn main() {
     let ping = PingV4Builder {
         timeout: 200,
-        ttl: Some(5),
+        ttl: Some(6),
         bind_addr: None,
     }
-        .build();
+    .build();
     let result = ping
         .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
         .expect("ping_v4_in_detail error");
