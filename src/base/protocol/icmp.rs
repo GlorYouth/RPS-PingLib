@@ -127,7 +127,7 @@ impl<'a> IcmpFormat<'a> {
             (8,11) => {
                 Ipv4Header::from_slice(&self.other_data[4..]).and_then(|header|{
                     IcmpFormat::from_slice(header.get_payload())
-                }).and_then(|icmp| {
+                }).and_then(|icmp| { // 考虑直接比较checksum
                     Some(icmp.other_data[2..].eq(&data.data[6..]))
                 }).is_some()
             }
