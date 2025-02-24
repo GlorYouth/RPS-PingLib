@@ -18,7 +18,7 @@ pub enum LinuxError {
     ConnectFailed(libc::c_int),
     SendFailed(libc::c_int),
 
-    SendtoFailed(libc::c_int),
+    SendMessageFailed(libc::c_int),
     RecvFailed(libc::c_int),
 
     MissRespondAddr,
@@ -51,7 +51,7 @@ impl PingV4 {
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
-                    size_of::<timeval>() as libc::socklen_t,
+                    size_of::<libc::timeval>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -69,7 +69,7 @@ impl PingV4 {
                 let err = libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
-                    size_of::<sock_addr>() as libc::socklen_t,
+                    size_of::<libc::sockaddr_in>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(SharedError::BindError(PingError::errno_to_str(
@@ -88,7 +88,7 @@ impl PingV4 {
                             libc::SOL_IP,
                             libc::IP_TTL,
                             &ttl as *const _ as *const libc::c_void,
-                            size_of::<ttl>() as libc::socklen_t,
+                            size_of::<u8>() as libc::socklen_t,
                         );
                         if err == -1 {
                             return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -111,10 +111,10 @@ impl PingV4 {
                     IcmpDataForPing::DATA_SIZE,
                     0,
                     &addr as *const _ as *const libc::sockaddr,
-                    size_of::<addr>() as libc::socklen_t,
+                    size_of::<libc::sockaddr_in>() as libc::socklen_t,
                 );
                 if err == -1 {
-                    return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                    return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
                 }
             }
             let start_time = std::time::Instant::now();
@@ -178,7 +178,7 @@ impl PingV6 {
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
-                    size_of::<timeval>() as libc::socklen_t,
+                    size_of::<libc::timeval>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -199,7 +199,7 @@ impl PingV6 {
                 let err = libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
-                    size_of::<sock_addr>() as libc::socklen_t,
+                    size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                 );
                 if err == -1 {
                     Err(
@@ -229,7 +229,7 @@ impl PingV6 {
                 let err = libc::connect(
                     sock,
                     &addr as *const _ as *const libc::sockaddr,
-                    size_of::<addr>() as libc::socklen_t,
+                    size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::ConnectFailed(PingError::get_errno()).into());
@@ -286,7 +286,7 @@ impl PingV6 {
                     iov_len: IcmpDataForPing::DATA_SIZE,
                 }];
 
-                let mut msg = match self.builder.ttl {
+                let msg = match self.builder.ttl {
                     None => libc::msghdr {
                         msg_name: &mut addr_v6 as *mut _ as *mut _,
                         msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
@@ -297,15 +297,17 @@ impl PingV6 {
                         msg_flags: 0,
                     },
                     Some(ttl) => {
+                        let ttl = ttl as u32;
+                        const CONTROL_BUFF_LEN: usize = unsafe { libc::CMSG_SPACE(size_of::<u32>() as _) as usize };
                         let mut control_buff =
-                            [0_u8; size_of::<libc::cmsghdr>() + size_of::<ttl>()];
+                            [0_u8; CONTROL_BUFF_LEN];
                         let msghdr = libc::msghdr {
                             msg_name: &mut addr_v6 as *mut _ as *mut _,
                             msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                             msg_iov: &mut iovec as *mut _ as *mut _,
                             msg_iovlen: 1,
                             msg_control: &mut control_buff as *mut _ as *mut _,
-                            msg_controllen: size_of::<control_buff>(),
+                            msg_controllen: CONTROL_BUFF_LEN,
                             msg_flags: 0,
                         };
                         let ttl_cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
@@ -314,20 +316,16 @@ impl PingV6 {
                         }
                         (*ttl_cmsghdr).cmsg_level = libc::SOL_IPV6;
                         (*ttl_cmsghdr).cmsg_type = libc::IPV6_HOPLIMIT;
-                        libc::memcpy(
-                            libc::CMSG_DATA(ttl_cmsghdr) as *mut _,
-                            &ttl as *const _ as *const _,
-                            size_of::<ttl>(),
-                        );
                         (*ttl_cmsghdr).cmsg_len =
-                            libc::CMSG_LEN(size_of::<ttl>() as libc::c_uint) as libc::size_t;
+                            libc::CMSG_LEN(size_of::<u32>() as _) as libc::size_t;
+                        libc::CMSG_DATA(ttl_cmsghdr).copy_from_nonoverlapping(&ttl as *const _ as *const _, size_of::<u32>());
                         msghdr
                     }
                 };
 
-                let err = libc::sendmsg(sock, msg as *const _ as *const _, 0);
+                let err = libc::sendmsg(sock, &msg as *const _ as *const _, 0);
                 if err == -1 {
-                    return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                    return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
                 }
             }
             let start_time = std::time::Instant::now();

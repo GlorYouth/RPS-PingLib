@@ -75,10 +75,10 @@ impl std::fmt::Debug for PingError {
                     )
                 }
 
-                LinuxError::SendtoFailed(str) => {
+                LinuxError::SendMessageFailed(str) => {
                     write!(
                         f,
-                        "PingError::LinuxError(SendFailed): Errno({str}) {:?}",
+                        "PingError::LinuxError(SendMessageFailed): Errno({str}) {:?}",
                         Self::errno_to_str(*str)
                     )
                 }
@@ -154,7 +154,7 @@ impl std::fmt::Display for PingError {
                     write!(f, "failed to send message: {:?}", Self::errno_to_str(*str))
                 }
 
-                LinuxError::SendtoFailed(str) => {
+                LinuxError::SendMessageFailed(str) => {
                     write!(
                         f,
                         "failed to send message to socket: {:?}",

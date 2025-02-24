@@ -1,17 +1,16 @@
 use multi_ping::{PingV4Builder, PingV6Builder};
 
 fn main() {
-    let ping = PingV4Builder {
+    let ping = PingV6Builder {
         timeout: 200,
-        ttl: Some(6),
+        ttl: Some(1),
         bind_addr: None,
-        #[cfg(target_os = "windows")]
-        window_addition: None,
+        scope_id_option: None,
     }
-    .build();
+        .build();
     let result = ping
-        .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
-        .expect("ping_v4_in_detail error");
+        .ping_in_detail("2606:4700:4700::1111".parse().unwrap())
+        .expect("ping_v6_in_detail error");
     println!(
         "{},{}",
         result.ip,
