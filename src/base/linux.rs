@@ -314,9 +314,8 @@ impl PingV6 {
                     };
                     let ttl_cmsghdr: volatile::VolatilePtr<libc::cmsghdr> = unsafe {
                         volatile::VolatilePtr::new(
-                            std::ptr::NonNull::new(libc::CMSG_FIRSTHDR(&msghdr)).ok_or(|| {
-                                LinuxError::NullPtr.into()
-                            })?,
+                            std::ptr::NonNull::new(libc::CMSG_FIRSTHDR(&msghdr))
+                                .ok_or(LinuxError::NullPtr)?,
                         ) // use VolatilePtr to avoid being optimized
                     };
 
@@ -332,7 +331,7 @@ impl PingV6 {
                             std::ptr::NonNull::new(libc::CMSG_DATA(
                                 ttl_cmsghdr.as_raw_ptr().as_ptr(),
                             ))
-                            .ok_or(|| LinuxError::NullPtr.into())?,
+                            .ok_or(LinuxError::NullPtr)?,
                         )
                         .map(|data_ptr| {
                             data_ptr.as_ptr().copy_from_nonoverlapping(
