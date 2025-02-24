@@ -46,24 +46,48 @@ impl std::fmt::Debug for PingError {
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => match e {
                 LinuxError::SocketSetupFailed(str) => {
-                    write!(f, "PingError::LinuxError(SocketSetupFailed): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(SocketSetupFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SetSockOptError(str) => {
-                    write!(f, "PingError::LinuxError(SetSockOptError): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(SetSockOptError): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
 
                 LinuxError::ConnectFailed(str) => {
-                    write!(f, "PingError::LinuxError(ConnectFailed): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(ConnectFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SendFailed(str) => {
-                    write!(f, "PingError::LinuxError(SendFailed): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(SendFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
 
                 LinuxError::SendtoFailed(str) => {
-                    write!(f, "PingError::LinuxError(SendFailed): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(SendFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::RecvFailed(str) => {
-                    write!(f, "PingError::LinuxError(RecvFailed): Errno({str}) {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "PingError::LinuxError(RecvFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
 
                 LinuxError::MissRespondAddr => {
@@ -112,21 +136,37 @@ impl std::fmt::Display for PingError {
                     write!(f, "failed to setup socket: {:?}", Self::errno_to_str(*str))
                 }
                 LinuxError::SetSockOptError(str) => {
-                    write!(f, "failed to set socket option: {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to set socket option: {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
 
                 LinuxError::ConnectFailed(str) => {
-                    write!(f, "failed to connect socket: {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to connect socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SendFailed(str) => {
                     write!(f, "failed to send message: {:?}", Self::errno_to_str(*str))
                 }
 
                 LinuxError::SendtoFailed(str) => {
-                    write!(f, "failed to send message to socket: {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to send message to socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::RecvFailed(str) => {
-                    write!(f, "failed to receive message from socket: {:?}", Self::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to receive message from socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
 
                 LinuxError::MissRespondAddr => {
@@ -143,7 +183,7 @@ impl PingError {
     pub fn get_errno() -> libc::c_int {
         unsafe { *libc::__errno_location() }
     }
-    
+
     pub fn errno_to_str(err: libc::c_int) -> Option<String> {
         unsafe {
             let mut ptr = libc::strerror(err) as *const u8;

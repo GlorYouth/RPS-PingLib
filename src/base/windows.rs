@@ -79,7 +79,7 @@ impl PingV4 {
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let des = target.to_bits();
-            let request_data: u128 = rand::rng().random();
+            let request_data: u128 = rand::rng().random(); // if you change this type, please change size_of::<u128> in reply_count
             let start_time = std::time::Instant::now();
 
             let request_options = match &self.info {
@@ -98,7 +98,7 @@ impl PingV4 {
                         None,
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -112,7 +112,7 @@ impl PingV4 {
                         addr.to_bits(),
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -127,7 +127,7 @@ impl PingV4 {
                         addition.apc_context,
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -141,7 +141,7 @@ impl PingV4 {
                         addr.to_bits(),
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -279,7 +279,7 @@ impl PingV6 {
                         },
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of_val(&request_data) as _,
+                    size_of::<u128>() as _,
                     request_options,
                     buf.as_ptr() as *mut _,
                     buf.len() as _,
@@ -317,7 +317,7 @@ impl PingV6 {
                         },
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of_val(&request_data) as _,
+                    size_of::<u128>() as _,
                     request_options,
                     buf.as_ptr() as *mut _,
                     buf.len() as _,

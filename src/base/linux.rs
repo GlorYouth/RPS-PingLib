@@ -51,7 +51,7 @@ impl PingV4 {
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
-                    size_of_val(&timeval) as libc::socklen_t,
+                    size_of::<timeval>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -69,10 +69,13 @@ impl PingV4 {
                 let err = libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
-                    size_of_val(&sock_addr) as libc::socklen_t,
+                    size_of::<sock_addr>() as libc::socklen_t,
                 );
                 if err == -1 {
-                    return Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into());
+                    return Err(SharedError::BindError(PingError::errno_to_str(
+                        PingError::get_errno(),
+                    ))
+                    .into());
                 }
             }
 
@@ -85,7 +88,7 @@ impl PingV4 {
                             libc::SOL_IP,
                             libc::IP_TTL,
                             &ttl as *const _ as *const libc::c_void,
-                            size_of_val(&ttl) as libc::socklen_t,
+                            size_of::<ttl>() as libc::socklen_t,
                         );
                         if err == -1 {
                             return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -108,7 +111,7 @@ impl PingV4 {
                     IcmpDataForPing::DATA_SIZE,
                     0,
                     &addr as *const _ as *const libc::sockaddr,
-                    size_of_val(&addr) as libc::socklen_t,
+                    size_of::<addr>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
@@ -161,9 +164,7 @@ impl PingV6 {
         unsafe {
             let sock = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6);
             if sock == -1 {
-                return Err(
-                    LinuxError::SocketSetupFailed(PingError::get_errno()).into(),
-                );
+                return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
             }
 
             {
@@ -177,7 +178,7 @@ impl PingV6 {
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
-                    size_of_val(&timeval) as libc::socklen_t,
+                    size_of::<timeval>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
@@ -198,10 +199,13 @@ impl PingV6 {
                 let err = libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
-                    size_of_val(&sock_addr) as libc::socklen_t,
+                    size_of::<sock_addr>() as libc::socklen_t,
                 );
                 if err == -1 {
-                    Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into())
+                    Err(
+                        SharedError::BindError(PingError::errno_to_str(PingError::get_errno()))
+                            .into(),
+                    )
                 } else {
                     Ok(sock)
                 }
@@ -225,7 +229,7 @@ impl PingV6 {
                 let err = libc::connect(
                     sock,
                     &addr as *const _ as *const libc::sockaddr,
-                    size_of_val(&addr) as libc::socklen_t,
+                    size_of::<addr>() as libc::socklen_t,
                 );
                 if err == -1 {
                     return Err(LinuxError::ConnectFailed(PingError::get_errno()).into());
@@ -268,32 +272,66 @@ impl PingV6 {
         let sock = self.precondition()?;
 
         unsafe {
+            let mut buff = IcmpDataForPing::new_ping_v6().into_inner();
             {
-                let sent = IcmpDataForPing::new_ping_v6().into_inner();
-                {
-                    let addr = libc::sockaddr_in6 {
-                        sin6_family: libc::AF_INET6 as u16,
-                        sin6_port: 0,
-                        sin6_flowinfo: 0,
-                        sin6_addr: std::mem::transmute(target),
-                        sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-                    };
-                    let err = libc::sendto(
-                        sock,
-                        sent.as_ptr() as *const _,
-                        IcmpDataForPing::DATA_SIZE,
-                        0,
-                        &addr as *const _ as *const libc::sockaddr,
-                        size_of_val(&addr) as libc::socklen_t,
-                    );
-                    if err == -1 {
-                        return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                let mut addr_v6 = libc::sockaddr_in6 {
+                    sin6_family: libc::AF_INET6 as u16,
+                    sin6_port: 0,
+                    sin6_flowinfo: 0,
+                    sin6_addr: std::mem::transmute(target),
+                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+                };
+                let mut iovec = [libc::iovec {
+                    iov_base: buff.as_mut_ptr() as *mut _,
+                    iov_len: IcmpDataForPing::DATA_SIZE,
+                }];
+
+                let mut msg = match self.builder.ttl {
+                    None => libc::msghdr {
+                        msg_name: &mut addr_v6 as *mut _ as *mut _,
+                        msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                        msg_iov: &mut iovec as *mut _ as *mut _,
+                        msg_iovlen: 1,
+                        msg_control: std::ptr::null_mut(),
+                        msg_controllen: 0,
+                        msg_flags: 0,
+                    },
+                    Some(ttl) => {
+                        let mut control_buff =
+                            [0_u8; size_of::<libc::cmsghdr>() + size_of::<ttl>()];
+                        let msghdr = libc::msghdr {
+                            msg_name: &mut addr_v6 as *mut _ as *mut _,
+                            msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                            msg_iov: &mut iovec as *mut _ as *mut _,
+                            msg_iovlen: 1,
+                            msg_control: &mut control_buff as *mut _ as *mut _,
+                            msg_controllen: size_of::<control_buff>(),
+                            msg_flags: 0,
+                        };
+                        let ttl_cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
+                        if ttl_cmsghdr.is_null() {
+                            panic!("CMSG_FIRSTHDR returned NULL");
+                        }
+                        (*ttl_cmsghdr).cmsg_level = libc::SOL_IPV6;
+                        (*ttl_cmsghdr).cmsg_type = libc::IPV6_HOPLIMIT;
+                        libc::memcpy(
+                            libc::CMSG_DATA(ttl_cmsghdr) as *mut _,
+                            &ttl as *const _ as *const _,
+                            size_of::<ttl>(),
+                        );
+                        (*ttl_cmsghdr).cmsg_len =
+                            libc::CMSG_LEN(size_of::<ttl>() as libc::c_uint) as libc::size_t;
+                        msghdr
                     }
+                };
+
+                let err = libc::sendmsg(sock, msg as *const _ as *const _, 0);
+                if err == -1 {
+                    return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
                 }
             }
             let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
             {
                 let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
                 let mut iovec = [libc::iovec {
