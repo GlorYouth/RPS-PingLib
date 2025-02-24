@@ -298,9 +298,9 @@ impl PingV6 {
                     },
                     Some(ttl) => {
                         let ttl = ttl as u32;
-                        const CONTROL_BUFF_LEN: usize = unsafe { libc::CMSG_SPACE(size_of::<u32>() as _) as usize };
-                        let mut control_buff =
-                            [0_u8; CONTROL_BUFF_LEN];
+                        const CONTROL_BUFF_LEN: usize =
+                            unsafe { libc::CMSG_SPACE(size_of::<u32>() as _) as usize };
+                        let mut control_buff = [0_u8; CONTROL_BUFF_LEN];
                         let msghdr = libc::msghdr {
                             msg_name: &mut addr_v6 as *mut _ as *mut _,
                             msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
@@ -310,15 +310,22 @@ impl PingV6 {
                             msg_controllen: CONTROL_BUFF_LEN,
                             msg_flags: 0,
                         };
-                        let ttl_cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
-                        if ttl_cmsghdr.is_null() {
-                            panic!("CMSG_FIRSTHDR returned NULL");
-                        }
-                        (*ttl_cmsghdr).cmsg_level = libc::SOL_IPV6;
-                        (*ttl_cmsghdr).cmsg_type = libc::IPV6_HOPLIMIT;
-                        (*ttl_cmsghdr).cmsg_len =
-                            libc::CMSG_LEN(size_of::<u32>() as _) as libc::size_t;
-                        libc::CMSG_DATA(ttl_cmsghdr).copy_from_nonoverlapping(&ttl as *const _ as *const _, size_of::<u32>());
+                        let ttl_cmsghdr: volatile::VolatilePtr<'_, libc::cmsghdr> =
+                            volatile::VolatilePtr::new(
+                                std::ptr::NonNull::new(libc::CMSG_FIRSTHDR(&msghdr)).unwrap(),
+                            ); // use VolatilePtr to avoid 
+
+                        ttl_cmsghdr.update(|mut cmsg| {
+                            cmsg.cmsg_level = libc::SOL_IPV6;
+                            cmsg.cmsg_type = libc::IPV6_HOPLIMIT;
+                            cmsg.cmsg_len = libc::CMSG_LEN(size_of::<u32>() as _) as libc::size_t;
+                            cmsg
+                        });
+                        libc::CMSG_DATA(ttl_cmsghdr.as_raw_ptr().as_ptr())
+                            .copy_from_nonoverlapping(
+                                &ttl as *const _ as *const _,
+                                size_of::<u32>(),
+                            );
                         msghdr
                     }
                 };
