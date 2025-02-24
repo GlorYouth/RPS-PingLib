@@ -93,6 +93,9 @@ impl std::fmt::Debug for PingError {
                 LinuxError::MissRespondAddr => {
                     write!(f, "PingError::LinuxError(MissRespondAddr)")
                 }
+                LinuxError::NullPtr => {
+                    write!(f, "PingError::LinuxError(NullPtr)")
+                }
             },
         }
     }
@@ -171,6 +174,9 @@ impl std::fmt::Display for PingError {
 
                 LinuxError::MissRespondAddr => {
                     write!(f, "query target address failed")
+                }
+                LinuxError::NullPtr => {
+                    write!(f, "query target null pointer")
                 }
             },
         }

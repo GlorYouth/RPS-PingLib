@@ -3,9 +3,11 @@ use multi_ping::{PingV4Builder, PingV6Builder};
 fn main() {
     let ping = PingV6Builder {
         timeout: 200,
-        ttl: Some(1),
+        ttl: Some(100),
         bind_addr: None,
         scope_id_option: None,
+        #[cfg(target_os = "windows")]
+        window_addition: None,
     }
     .build();
     let result = ping

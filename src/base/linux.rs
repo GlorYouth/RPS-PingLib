@@ -22,6 +22,7 @@ pub enum LinuxError {
     RecvFailed(libc::c_int),
 
     MissRespondAddr,
+    NullPtr,
 }
 
 impl PingV4 {
@@ -271,101 +272,114 @@ impl PingV6 {
     pub fn ping_in_detail(&self, target: std::net::Ipv6Addr) -> Result<PingV6Result, PingError> {
         let sock = self.precondition()?;
 
-        unsafe {
-            let mut buff = IcmpDataForPing::new_ping_v6().into_inner();
-            {
-                let mut addr_v6 = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as u16,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: std::mem::transmute(target),
-                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-                };
-                let mut iovec = [libc::iovec {
-                    iov_base: buff.as_mut_ptr() as *mut _,
-                    iov_len: IcmpDataForPing::DATA_SIZE,
-                }];
+        let mut buff = IcmpDataForPing::new_ping_v6().into_inner();
+        {
+            let mut addr_v6 = libc::sockaddr_in6 {
+                sin6_family: libc::AF_INET6 as u16,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: unsafe { std::mem::transmute(target) },
+                sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+            };
+            let mut iovec = [libc::iovec {
+                iov_base: buff.as_mut_ptr() as *mut _,
+                iov_len: IcmpDataForPing::DATA_SIZE,
+            }];
 
-                let msg = match self.builder.ttl {
-                    None => libc::msghdr {
-                        msg_name: &mut addr_v6 as *mut _ as *mut _,
-                        msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                        msg_iov: &mut iovec as *mut _ as *mut _,
-                        msg_iovlen: 1,
-                        msg_control: std::ptr::null_mut(),
-                        msg_controllen: 0,
-                        msg_flags: 0,
-                    },
-                    Some(ttl) => {
-                        let ttl = ttl as u32;
-                        const CONTROL_BUFF_LEN: usize =
-                            unsafe { libc::CMSG_SPACE(size_of::<u32>() as _) as usize };
-                        let mut control_buff = [0_u8; CONTROL_BUFF_LEN];
-                        let msghdr = libc::msghdr {
-                            msg_name: &mut addr_v6 as *mut _ as *mut _,
-                            msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                            msg_iov: &mut iovec as *mut _ as *mut _,
-                            msg_iovlen: 1,
-                            msg_control: &mut control_buff as *mut _ as *mut _,
-                            msg_controllen: CONTROL_BUFF_LEN,
-                            msg_flags: 0,
-                        };
-                        let ttl_cmsghdr: volatile::VolatilePtr<'_, libc::cmsghdr> =
-                            volatile::VolatilePtr::new(
-                                std::ptr::NonNull::new(libc::CMSG_FIRSTHDR(&msghdr)).unwrap(),
-                            ); // use VolatilePtr to avoid 
-
-                        ttl_cmsghdr.update(|mut cmsg| {
-                            cmsg.cmsg_level = libc::SOL_IPV6;
-                            cmsg.cmsg_type = libc::IPV6_HOPLIMIT;
-                            cmsg.cmsg_len = libc::CMSG_LEN(size_of::<u32>() as _) as libc::size_t;
-                            cmsg
-                        });
-                        libc::CMSG_DATA(ttl_cmsghdr.as_raw_ptr().as_ptr())
-                            .copy_from_nonoverlapping(
-                                &ttl as *const _ as *const _,
-                                size_of::<u32>(),
-                            );
-                        msghdr
-                    }
-                };
-
-                let err = libc::sendmsg(sock, &msg as *const _ as *const _, 0);
-                if err == -1 {
-                    return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
-                }
-            }
-            let start_time = std::time::Instant::now();
-
-            {
-                let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
-                let mut iovec = [libc::iovec {
-                    iov_base: buff.as_mut_ptr() as *mut _,
-                    iov_len: IcmpDataForPing::DATA_SIZE,
-                }];
-                let mut msg = libc::msghdr {
-                    msg_name: addr_v6.as_mut_ptr() as *mut _,
+            let msg = match self.builder.ttl {
+                None => libc::msghdr {
+                    msg_name: &mut addr_v6 as *mut _ as *mut _,
                     msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                     msg_iov: &mut iovec as *mut _ as *mut _,
                     msg_iovlen: 1,
                     msg_control: std::ptr::null_mut(),
                     msg_controllen: 0,
                     msg_flags: 0,
-                };
-                let len = libc::recvmsg(sock, &mut msg as *mut _ as *mut _, 0);
-                let duration = std::time::Instant::now().duration_since(start_time);
-                if len == -1 {
-                    println!("{:?}", *libc::__errno_location());
-                    return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+                },
+                Some(ttl) => {
+                    let ttl = ttl as TTL; // use u32, instead you will have to deal with problem in CMSG_LEN API
+                    type TTL = u32;
+
+                    const CONTROL_BUFF_LEN: usize =
+                        unsafe { libc::CMSG_SPACE(size_of::<TTL>() as _) as usize };
+                    let mut control_buff = [0_u8; CONTROL_BUFF_LEN];
+                    let msghdr = libc::msghdr {
+                        msg_name: &mut addr_v6 as *mut _ as *mut _,
+                        msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                        msg_iov: &mut iovec as *mut _ as *mut _,
+                        msg_iovlen: 1,
+                        msg_control: &mut control_buff as *mut _ as *mut _,
+                        msg_controllen: CONTROL_BUFF_LEN,
+                        msg_flags: 0,
+                    };
+                    let ttl_cmsghdr: volatile::VolatilePtr<libc::cmsghdr> = unsafe {
+                        volatile::VolatilePtr::new(
+                            std::ptr::NonNull::new(libc::CMSG_FIRSTHDR(&msghdr)).ok_or(|| {
+                                LinuxError::NullPtr.into()
+                            })?,
+                        ) // use VolatilePtr to avoid being optimized
+                    };
+
+                    ttl_cmsghdr.update(|mut cmsg| {
+                        cmsg.cmsg_level = libc::SOL_IPV6;
+                        cmsg.cmsg_type = libc::IPV6_HOPLIMIT;
+                        cmsg.cmsg_len =
+                            unsafe { libc::CMSG_LEN(size_of::<TTL>() as _) } as libc::size_t;
+                        cmsg
+                    });
+                    let _ = unsafe {
+                        volatile::VolatilePtr::new(
+                            std::ptr::NonNull::new(libc::CMSG_DATA(
+                                ttl_cmsghdr.as_raw_ptr().as_ptr(),
+                            ))
+                            .ok_or(|| LinuxError::NullPtr.into())?,
+                        )
+                        .map(|data_ptr| {
+                            data_ptr.as_ptr().copy_from_nonoverlapping(
+                                &ttl as *const _ as *const _,
+                                size_of::<TTL>(),
+                            );
+                            data_ptr
+                        })
+                    };
+                    msghdr
                 }
-                if msg.msg_namelen == 0 {
-                    return Err(LinuxError::MissRespondAddr.into());
-                }
-                Ok(PingV6Result {
-                    ip: std::net::Ipv6Addr::from(addr_v6.assume_init().sin6_addr.s6_addr),
-                    duration,
-                })
+            };
+
+            let err = unsafe { libc::sendmsg(sock, &msg as *const _ as *const _, 0) };
+            if err == -1 {
+                return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
             }
+        }
+        let start_time = std::time::Instant::now();
+
+        {
+            let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
+            let mut iovec = [libc::iovec {
+                iov_base: buff.as_mut_ptr() as *mut _,
+                iov_len: IcmpDataForPing::DATA_SIZE,
+            }];
+            let mut msg = libc::msghdr {
+                msg_name: addr_v6.as_mut_ptr() as *mut _,
+                msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                msg_iov: &mut iovec as *mut _ as *mut _,
+                msg_iovlen: 1,
+                msg_control: std::ptr::null_mut(),
+                msg_controllen: 0,
+                msg_flags: 0,
+            };
+            let len = unsafe { libc::recvmsg(sock, &mut msg as *mut _ as *mut _, 0) };
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+            }
+            if msg.msg_namelen == 0 {
+                return Err(LinuxError::MissRespondAddr.into());
+            }
+            Ok(PingV6Result {
+                ip: std::net::Ipv6Addr::from(unsafe { addr_v6.assume_init() }.sin6_addr.s6_addr),
+                duration,
+            })
         }
     }
 }
