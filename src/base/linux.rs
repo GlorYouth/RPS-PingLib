@@ -72,7 +72,7 @@ impl PingV4 {
                     size_of_val(&sock_addr) as libc::socklen_t,
                 );
                 if err == -1 {
-                    return Err(SharedError::BindError(err.to_string()).into());
+                    return Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into());
                 }
             }
 
@@ -201,7 +201,7 @@ impl PingV6 {
                     size_of_val(&sock_addr) as libc::socklen_t,
                 );
                 if err == -1 {
-                    Err(SharedError::BindError(err.to_string()).into())
+                    Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into())
                 } else {
                     Ok(sock)
                 }

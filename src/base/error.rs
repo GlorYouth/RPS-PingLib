@@ -22,7 +22,7 @@ impl std::fmt::Debug for PingError {
                     write!(f, "SharedError::Unreachable")
                 }
                 SharedError::BindError(str) => {
-                    write!(f, "SharedError::BindError({})", str)
+                    write!(f, "SharedError::BindError({:?})", str)
                 }
             },
             #[cfg(target_os = "windows")]
@@ -85,7 +85,7 @@ impl std::fmt::Display for PingError {
                     write!(f, "ping unreachable")
                 }
                 SharedError::BindError(str) => {
-                    write!(f, "ping bind error: {}", str)
+                    write!(f, "ping bind error: {:?}", str)
                 }
             },
             #[cfg(target_os = "windows")]
@@ -137,13 +137,14 @@ impl std::fmt::Display for PingError {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 impl PingError {
     #[inline]
     pub fn get_errno() -> libc::c_int {
         unsafe { *libc::__errno_location() }
     }
     
-    fn errno_to_str(err: libc::c_int) -> Option<String> {
+    pub fn errno_to_str(err: libc::c_int) -> Option<String> {
         unsafe {
             let mut ptr = libc::strerror(err) as *const u8;
             let mut offset = 0;
@@ -165,7 +166,7 @@ impl PingError {
 pub enum SharedError {
     Timeout,
     Unreachable,
-    BindError(String),
+    BindError(Option<String>),
 }
 
 impl From<SharedError> for PingError {
