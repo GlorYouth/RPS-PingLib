@@ -36,28 +36,66 @@ pub struct PingV6 {
     info: Option<UnMut<IP_OPTION_INFORMATION>>,
 }
 
+mod common {
+    use super::*;
+    #[cfg(target_pointer_width = "32")]
+    #[inline]
+    pub(super) fn new_ip_option_info(ttl: u8) -> Option<UnMut<IP_OPTION_INFORMATION32>> {
+        Some(UnMut::new(IP_OPTION_INFORMATION32 {
+            Ttl: ttl,
+            Tos: 0,
+            Flags: 0,
+            OptionsSize: 0,
+            OptionsData: null_mut(),
+        }))
+    }
+    #[cfg(target_pointer_width = "64")]
+    #[inline]
+    pub(super) fn new_ip_option_info(ttl: u8) -> Option<UnMut<IP_OPTION_INFORMATION>> {
+        Some(UnMut::new(IP_OPTION_INFORMATION {
+            Ttl: ttl,
+            Tos: 0,
+            Flags: 0,
+            OptionsSize: 0,
+            OptionsData: null_mut(),
+        }))
+    }
+
+    #[inline]
+    pub(super) fn check_reply_count(count: u32, handler: windows::Win32::Foundation::HANDLE) -> Result<(), PingError> {
+        if count == 0 {
+            let error = unsafe { GetLastError() };
+            unsafe { IpHelper::IcmpCloseHandle(handler) }
+                .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+            return Err(solve_recv_error(error))
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(super) fn check_parse_error(err: u32, target:u32, handler: windows::Win32::Foundation::HANDLE) -> Result<(), PingError> {
+        unsafe {
+            if err == target {
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Ok(())
+            } else {
+                let error = GetLastError();
+                IpHelper::IcmpCloseHandle(handler)
+                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
+                Err(WindowsError::IcmpParseRepliesError(error.0).into())
+            }
+        }
+    }
+}
+
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> PingV4 {
         match builder.ttl {
             Some(ttl) => PingV4 {
                 builder,
-                #[cfg(target_pointer_width = "32")]
-                info: Some(UnMut::new(IP_OPTION_INFORMATION32 {
-                    Ttl: ttl,
-                    Tos: 0,
-                    Flags: 0,
-                    OptionsSize: 0,
-                    OptionsData: null_mut(),
-                })),
-                #[cfg(target_pointer_width = "64")]
-                info: Some(UnMut::new(IP_OPTION_INFORMATION {
-                    Ttl: ttl,
-                    Tos: 0,
-                    Flags: 0,
-                    OptionsSize: 0,
-                    OptionsData: null_mut(),
-                })),
+                info: common::new_ip_option_info(ttl),
             },
             None => PingV4 {
                 builder,
@@ -150,27 +188,14 @@ impl PingV4 {
                 },
             };
 
-            if reply_count == 0 {
-                let error = GetLastError();
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                return Err(solve_recv_error(error));
-            }
+            common::check_reply_count(reply_count, handler)?;
 
             let reply_time = std::time::Instant::now().duration_since(start_time);
 
             let parse_error = IpHelper::IcmpParseReplies(buf.as_ptr() as *mut _, reply_count);
 
-            if parse_error == 0 {
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                Ok(reply_time)
-            } else {
-                let error = GetLastError();
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                Err(WindowsError::IcmpParseRepliesError(error.0).into())
-            }
+            common::check_parse_error(parse_error,0, handler).map(|_| reply_time)
+
         }
     }
 
@@ -196,22 +221,7 @@ impl PingV6 {
         match builder.ttl {
             Some(ttl) => PingV6 {
                 builder,
-                #[cfg(target_pointer_width = "32")]
-                info: Some(UnMut::new(IP_OPTION_INFORMATION32 {
-                    Ttl: ttl,
-                    Tos: 0,
-                    Flags: 0,
-                    OptionsSize: 0,
-                    OptionsData: null_mut(),
-                })),
-                #[cfg(target_pointer_width = "64")]
-                info: Some(UnMut::new(IP_OPTION_INFORMATION {
-                    Ttl: ttl,
-                    Tos: 0,
-                    Flags: 0,
-                    OptionsSize: 0,
-                    OptionsData: null_mut(),
-                })),
+                info: common::new_ip_option_info(ttl),
             },
             None => PingV6 {
                 builder,
@@ -246,38 +256,42 @@ impl PingV6 {
                 Some(addr) => std::mem::transmute(addr),
             };
 
+            let source_addr = WinSock::SOCKADDR_IN6 {
+                sin6_family: WinSock::AF_INET6,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: WinSock::IN6_ADDR {
+                    u: WinSock::IN6_ADDR_0 { Byte: bind_addr },
+                },
+                Anonymous: match self.builder.scope_id_option {
+                    None => Default::default(),
+                    Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
+                },
+            };
+
+            let dest_addr = WinSock::SOCKADDR_IN6 {
+                sin6_family: WinSock::AF_INET6,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: WinSock::IN6_ADDR {
+                    u: WinSock::IN6_ADDR_0 {
+                        Byte: std::mem::transmute(target),
+                    },
+                },
+                Anonymous: match self.builder.scope_id_option {
+                    None => Default::default(),
+                    Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
+                },
+            };
+
             let reply_count = match &self.builder.window_addition {
                 None => IpHelper::Icmp6SendEcho2(
                     handler,
                     None,
                     None,
                     None,
-                    &WinSock::SOCKADDR_IN6 {
-                        sin6_family: WinSock::AF_INET6,
-                        sin6_port: 0,
-                        sin6_flowinfo: 0,
-                        sin6_addr: WinSock::IN6_ADDR {
-                            u: WinSock::IN6_ADDR_0 { Byte: bind_addr },
-                        },
-                        Anonymous: match self.builder.scope_id_option {
-                            None => Default::default(),
-                            Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
-                        },
-                    },
-                    &WinSock::SOCKADDR_IN6 {
-                        sin6_family: WinSock::AF_INET6,
-                        sin6_port: 0,
-                        sin6_flowinfo: 0,
-                        sin6_addr: WinSock::IN6_ADDR {
-                            u: WinSock::IN6_ADDR_0 {
-                                Byte: std::mem::transmute(target),
-                            },
-                        },
-                        Anonymous: match self.builder.scope_id_option {
-                            None => Default::default(),
-                            Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
-                        },
-                    },
+                    &source_addr,
+                    &dest_addr,
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of::<u128>() as _,
                     request_options,
@@ -290,32 +304,8 @@ impl PingV6 {
                     addition.event,
                     addition.apc_routine,
                     addition.apc_context,
-                    &WinSock::SOCKADDR_IN6 {
-                        sin6_family: WinSock::AF_INET6,
-                        sin6_port: 0,
-                        sin6_flowinfo: 0,
-                        sin6_addr: WinSock::IN6_ADDR {
-                            u: WinSock::IN6_ADDR_0 { Byte: bind_addr },
-                        },
-                        Anonymous: match self.builder.scope_id_option {
-                            None => Default::default(),
-                            Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
-                        },
-                    },
-                    &WinSock::SOCKADDR_IN6 {
-                        sin6_family: WinSock::AF_INET6,
-                        sin6_port: 0,
-                        sin6_flowinfo: 0,
-                        sin6_addr: WinSock::IN6_ADDR {
-                            u: WinSock::IN6_ADDR_0 {
-                                Byte: std::mem::transmute(target),
-                            },
-                        },
-                        Anonymous: match self.builder.scope_id_option {
-                            None => Default::default(),
-                            Some(id) => WinSock::SOCKADDR_IN6_0 { sin6_scope_id: id },
-                        },
-                    },
+                    &source_addr,
+                    &dest_addr,
                     request_data.to_be_bytes().as_ptr() as *mut _,
                     size_of::<u128>() as _,
                     request_options,
@@ -325,27 +315,13 @@ impl PingV6 {
                 ),
             };
 
-            if reply_count == 0 {
-                let error = GetLastError();
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                return Err(solve_recv_error(error));
-            }
+            common::check_reply_count(reply_count,handler)?;
 
             let reply_time = std::time::Instant::now().duration_since(start_time);
 
             let parse_error = IpHelper::Icmp6ParseReplies(buf.as_ptr() as *mut _, reply_count);
 
-            if parse_error == 1 {
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                Ok(reply_time)
-            } else {
-                let error = GetLastError();
-                IpHelper::IcmpCloseHandle(handler)
-                    .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-                Err(WindowsError::IcmpParseRepliesError(error.0).into())
-            }
+            common::check_parse_error(parse_error,1, handler).map(|_| reply_time)
         }
     }
 
