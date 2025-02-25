@@ -40,7 +40,7 @@ impl LinuxError {
     }
     
     #[inline]
-    fn convert_bind_failed(input: libc::c_int) -> PingError {
+    fn convert_setup_failed(input: libc::c_int) -> PingError {
         match input {
             1 => PingError::SharedError(SharedError::NoElevatedPrivilege),
             _ => PingError::LinuxError(LinuxError::BindFailed(input)),
@@ -80,7 +80,7 @@ impl PingV4 {
     fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if sock == -1 {
-            return Err(LinuxError::SocketSetupFailed(LinuxError::get_errno()).into());
+            return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
 
         {
@@ -123,7 +123,7 @@ impl PingV4 {
                     )
                 };
                 if err == -1 {
-                    return Err(LinuxError::convert_bind_failed(LinuxError::get_errno()));
+                    return Err(LinuxError::BindFailed(LinuxError::get_errno()).into());
                 }
             }
         }
@@ -273,7 +273,7 @@ impl PingV6 {
     fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
         if sock == -1 {
-            return Err(LinuxError::SocketSetupFailed(LinuxError::get_errno()).into());
+            return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
 
         {
@@ -315,7 +315,7 @@ impl PingV6 {
                 )
             };
             if err == -1 {
-                Err(LinuxError::convert_bind_failed(LinuxError::get_errno()))
+                Err(LinuxError::BindFailed(LinuxError::get_errno()).into())
             } else {
                 Ok(sock)
             }
