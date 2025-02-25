@@ -1,15 +1,10 @@
+use rand::Rng;
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::base::utils::un_mut::UnMut;
 use crate::{PingV4Result, PingV6Result};
-use rand::Rng;
-use std::ptr::null_mut;
-use windows::Win32::Foundation::{GetLastError, WIN32_ERROR};
+use windows::Win32::Foundation;
 use windows::Win32::NetworkManagement::IpHelper;
-#[cfg(target_pointer_width = "64")]
-use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
-#[cfg(target_pointer_width = "32")]
-use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32;
 use windows::Win32::Networking::WinSock;
 
 pub enum WindowsError {
@@ -22,18 +17,12 @@ pub enum WindowsError {
 
 pub struct PingV4 {
     builder: PingV4Builder,
-    #[cfg(target_pointer_width = "32")]
-    info: Option<UnMut<IP_OPTION_INFORMATION32>>,
-    #[cfg(target_pointer_width = "64")]
-    info: Option<UnMut<IP_OPTION_INFORMATION>>,
+    info: common::IpOptionInformation,
 }
 
 pub struct PingV6 {
     builder: PingV6Builder,
-    #[cfg(target_pointer_width = "32")]
-    info: Option<UnMut<IP_OPTION_INFORMATION32>>,
-    #[cfg(target_pointer_width = "64")]
-    info: Option<UnMut<IP_OPTION_INFORMATION>>,
+    info: common::IpOptionInformation,
 }
 
 mod common {
@@ -49,22 +38,12 @@ mod common {
             OptionsData: null_mut(),
         }))
     }
-    #[cfg(target_pointer_width = "64")]
-    #[inline]
-    pub(super) fn new_ip_option_info(ttl: u8) -> Option<UnMut<IP_OPTION_INFORMATION>> {
-        Some(UnMut::new(IP_OPTION_INFORMATION {
-            Ttl: ttl,
-            Tos: 0,
-            Flags: 0,
-            OptionsSize: 0,
-            OptionsData: null_mut(),
-        }))
-    }
+
 
     #[inline]
-    pub(super) fn check_reply_count(count: u32, handler: windows::Win32::Foundation::HANDLE) -> Result<(), PingError> {
+    pub(super) fn check_reply_count(count: u32, handler: Foundation::HANDLE) -> Result<(), PingError> {
         if count == 0 {
-            let error = unsafe { GetLastError() };
+            let error = unsafe { Foundation::GetLastError() };
             unsafe { IpHelper::IcmpCloseHandle(handler) }
                 .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
             return Err(solve_recv_error(error))
@@ -73,18 +52,49 @@ mod common {
     }
 
     #[inline]
-    pub(super) fn check_parse_error(err: u32, target:u32, handler: windows::Win32::Foundation::HANDLE) -> Result<(), PingError> {
+    pub(super) fn check_parse_error(err: u32, target:u32, handler: Foundation::HANDLE) -> Result<(), PingError> {
         unsafe {
             if err == target {
                 IpHelper::IcmpCloseHandle(handler)
                     .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
                 Ok(())
             } else {
-                let error = GetLastError();
+                let error = Foundation::GetLastError();
                 IpHelper::IcmpCloseHandle(handler)
                     .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
                 Err(WindowsError::IcmpParseRepliesError(error.0).into())
             }
+        }
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    pub(super) struct IpOptionInformation(Option<UnMut<IpHelper::IP_OPTION_INFORMATION32>>);
+    #[cfg(target_pointer_width = "64")]
+    pub(super) struct IpOptionInformation(pub(super) Option<UnMut<IpHelper::IP_OPTION_INFORMATION>>);
+
+    impl IpOptionInformation {
+        #[cfg(target_pointer_width = "64")]
+        #[inline]
+        pub(super) fn new(ttl: u8) -> Self {
+            Self(Some(UnMut::new(IpHelper::IP_OPTION_INFORMATION {
+                Ttl: ttl,
+                Tos: 0,
+                Flags: 0,
+                OptionsSize: 0,
+                OptionsData: std::ptr::null_mut(),
+            })))
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        #[inline]
+        pub(super) fn new(ttl: u8) -> Self {
+            Self(Some(UnMut::new(IpHelper::IP_OPTION_INFORMATION32 {
+                Ttl: ttl,
+                Tos: 0,
+                Flags: 0,
+                OptionsSize: 0,
+                OptionsData: std::ptr::null_mut(),
+            })))
         }
     }
 }
@@ -95,11 +105,11 @@ impl PingV4 {
         match builder.ttl {
             Some(ttl) => PingV4 {
                 builder,
-                info: common::new_ip_option_info(ttl),
+                info: common::IpOptionInformation::new(ttl),
             },
             None => PingV4 {
                 builder,
-                info: None,
+                info: common::IpOptionInformation(None),
             },
         }
     }
@@ -112,7 +122,7 @@ impl PingV4 {
         buf: &mut [u8; Self::REPLY_BUFFER_SIZE],
     ) -> Result<std::time::Duration, PingError> {
         unsafe {
-            let handler: windows::Win32::Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
+            let handler: Foundation::HANDLE = match IpHelper::IcmpCreateFile() {
                 Ok(v) => v,
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
@@ -120,7 +130,7 @@ impl PingV4 {
             let request_data: u128 = rand::rng().random(); // if you change this type, please change size_of::<u128> in reply_count
             let start_time = std::time::Instant::now();
 
-            let request_options = match &self.info {
+            let request_options = match &self.info.0 {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
@@ -221,11 +231,11 @@ impl PingV6 {
         match builder.ttl {
             Some(ttl) => PingV6 {
                 builder,
-                info: common::new_ip_option_info(ttl),
+                info: common::IpOptionInformation::new(ttl),
             },
             None => PingV6 {
                 builder,
-                info: None,
+                info: common::IpOptionInformation(None),
             },
         }
     }
@@ -239,14 +249,14 @@ impl PingV6 {
         buf: &mut [u8; Self::REPLY_BUFFER_SIZE],
     ) -> Result<std::time::Duration, PingError> {
         unsafe {
-            let handler: windows::Win32::Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
+            let handler: Foundation::HANDLE = match IpHelper::Icmp6CreateFile() {
                 Ok(v) => v,
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let request_data: u128 = rand::rng().random();
             let start_time = std::time::Instant::now();
 
-            let request_options = match &self.info {
+            let request_options = match &self.info.0 {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
@@ -342,14 +352,14 @@ impl PingV6 {
     }
 }
 
-fn solve_recv_error(error: WIN32_ERROR) -> PingError {
+fn solve_recv_error(error: Foundation::WIN32_ERROR) -> PingError {
     match error {
-        WIN32_ERROR(11010) => SharedError::Timeout.into(),
-        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE => SharedError::Unreachable.into(),
-        windows::Win32::Foundation::ERROR_INVALID_PARAMETER => {
+        Foundation::WIN32_ERROR(11010) => SharedError::Timeout.into(),
+        Foundation::ERROR_NETWORK_UNREACHABLE => SharedError::Unreachable.into(),
+        Foundation::ERROR_INVALID_PARAMETER => {
             WindowsError::InvalidParameter.into()
         }
-        WIN32_ERROR(_) => WindowsError::UnknownError(error.0).into(),
+        Foundation::WIN32_ERROR(_) => WindowsError::UnknownError(error.0).into(),
     }
 }
 
