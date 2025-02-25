@@ -1,8 +1,8 @@
-use rand::Rng;
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::base::utils::un_mut::UnMut;
 use crate::{PingV4Result, PingV6Result};
+use rand::Rng;
 use windows::Win32::Foundation;
 use windows::Win32::NetworkManagement::IpHelper;
 use windows::Win32::Networking::WinSock;
@@ -29,18 +29,25 @@ mod common {
     use super::*;
 
     #[inline]
-    pub(super) fn check_reply_count(count: u32, handler: Foundation::HANDLE) -> Result<(), PingError> {
+    pub(super) fn check_reply_count(
+        count: u32,
+        handler: Foundation::HANDLE,
+    ) -> Result<(), PingError> {
         if count == 0 {
             let error = unsafe { Foundation::GetLastError() };
             unsafe { IpHelper::IcmpCloseHandle(handler) }
                 .map_err(|e| WindowsError::IcmpCloseFileError(e.message()))?;
-            return Err(solve_recv_error(error))
+            return Err(solve_recv_error(error));
         }
         Ok(())
     }
 
     #[inline]
-    pub(super) fn check_parse_error(err: u32, target:u32, handler: Foundation::HANDLE) -> Result<(), PingError> {
+    pub(super) fn check_parse_error(
+        err: u32,
+        target: u32,
+        handler: Foundation::HANDLE,
+    ) -> Result<(), PingError> {
         unsafe {
             if err == target {
                 IpHelper::IcmpCloseHandle(handler)
@@ -58,7 +65,9 @@ mod common {
     #[cfg(target_pointer_width = "32")]
     pub(super) struct IpOptionInformation(Option<UnMut<IpHelper::IP_OPTION_INFORMATION32>>);
     #[cfg(target_pointer_width = "64")]
-    pub(super) struct IpOptionInformation(pub(super) Option<UnMut<IpHelper::IP_OPTION_INFORMATION>>);
+    pub(super) struct IpOptionInformation(
+        pub(super) Option<UnMut<IpHelper::IP_OPTION_INFORMATION>>,
+    );
 
     impl IpOptionInformation {
         #[cfg(target_pointer_width = "64")]
@@ -116,13 +125,13 @@ impl PingV4 {
             };
             let des = target.to_bits();
             let request_data: u128 = rand::rng().random(); // if you change this type, please change size_of::<u128> in reply_count
-            let start_time = std::time::Instant::now();
-
+            
             let request_options = match &self.info.0 {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
-
+            
+            let start_time = std::time::Instant::now();
             let reply_count = match &self.builder.window_addition {
                 // window_addition 确定第2-4项参数
                 None => match self.builder.bind_addr {
@@ -185,15 +194,11 @@ impl PingV4 {
                     ),
                 },
             };
-
+            let reply_time = std::time::Instant::now().duration_since(start_time);
             common::check_reply_count(reply_count, handler)?;
 
-            let reply_time = std::time::Instant::now().duration_since(start_time);
-
             let parse_error = IpHelper::IcmpParseReplies(buf.as_ptr() as *mut _, reply_count);
-
-            common::check_parse_error(parse_error,0, handler).map(|_| reply_time)
-
+            common::check_parse_error(parse_error, 0, handler).map(|_| reply_time)
         }
     }
 
@@ -242,7 +247,6 @@ impl PingV6 {
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let request_data: u128 = rand::rng().random();
-            let start_time = std::time::Instant::now();
 
             let request_options = match &self.info.0 {
                 None => None,
@@ -282,6 +286,7 @@ impl PingV6 {
                 },
             };
 
+            let start_time = std::time::Instant::now();
             let reply_count = match &self.builder.window_addition {
                 None => IpHelper::Icmp6SendEcho2(
                     handler,
@@ -312,14 +317,11 @@ impl PingV6 {
                     self.builder.timeout,
                 ),
             };
-
-            common::check_reply_count(reply_count,handler)?;
-
             let reply_time = std::time::Instant::now().duration_since(start_time);
+            common::check_reply_count(reply_count, handler)?;
 
             let parse_error = IpHelper::Icmp6ParseReplies(buf.as_ptr() as *mut _, reply_count);
-
-            common::check_parse_error(parse_error,1, handler).map(|_| reply_time)
+            common::check_parse_error(parse_error, 1, handler).map(|_| reply_time)
         }
     }
 
@@ -344,9 +346,7 @@ fn solve_recv_error(error: Foundation::WIN32_ERROR) -> PingError {
     match error {
         Foundation::WIN32_ERROR(11010) => SharedError::Timeout.into(),
         Foundation::ERROR_NETWORK_UNREACHABLE => SharedError::Unreachable.into(),
-        Foundation::ERROR_INVALID_PARAMETER => {
-            WindowsError::InvalidParameter.into()
-        }
+        Foundation::ERROR_INVALID_PARAMETER => WindowsError::InvalidParameter.into(),
         Foundation::WIN32_ERROR(_) => WindowsError::UnknownError(error.0).into(),
     }
 }

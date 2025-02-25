@@ -23,7 +23,7 @@ impl<'a> Ipv4Header<'a> {
             payload_slice: &slice[header_length as usize..],
         })
     }
-    
+
     // #[inline]
     // pub fn get_type(&self) -> u8 {
     //     self.fix_slice[1]
@@ -97,7 +97,8 @@ impl<'a> Ipv6Header<'a> {
         }
     }
 
-    fn alignment_u8_size(u: u8) -> u8 { // option part slices' sizes are aligned to 8 bits, but I can't sure if it right
+    fn alignment_u8_size(u: u8) -> u8 {
+        // option part slices' sizes are aligned to 8 bits, but I can't sure if it right
         if u == 0 {
             return 8;
         }
