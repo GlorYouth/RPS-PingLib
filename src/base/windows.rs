@@ -131,68 +131,40 @@ impl PingV4 {
                 Some(info) => Some(info.as_const_ref()),
             };
 
+            let (event, apc_routine, apc_context) = match &self.builder.window_addition {
+                None => (None, None, None),
+                Some(addition) => (addition.event, addition.apc_routine, addition.apc_context),
+            };
+
             let start_time = std::time::Instant::now();
-            let reply_count = match &self.builder.window_addition {
-                // window_addition 确定第2-4项参数
-                None => match self.builder.bind_addr {
-                    // bind_addr确定调用方法是否有原地址
-                    None => IpHelper::IcmpSendEcho2(
-                        handler,
-                        None,
-                        None,
-                        None,
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                    Some(addr) => IpHelper::IcmpSendEcho2Ex(
-                        handler,
-                        None,
-                        None,
-                        None,
-                        addr.to_bits(),
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                },
-                Some(addition) => match self.builder.bind_addr {
-                    None => IpHelper::IcmpSendEcho2(
-                        handler,
-                        addition.event,
-                        addition.apc_routine,
-                        addition.apc_context,
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                    Some(addr) => IpHelper::IcmpSendEcho2Ex(
-                        handler,
-                        addition.event,
-                        addition.apc_routine,
-                        addition.apc_context,
-                        addr.to_bits(),
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                },
+            let reply_count = match &self.builder.bind_addr {
+                None => IpHelper::IcmpSendEcho2(
+                    handler,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    des,
+                    request_data.to_be_bytes().as_ptr() as *mut _,
+                    size_of::<u128>() as _,
+                    request_options,
+                    buf.as_ptr() as *mut _,
+                    buf.len() as _,
+                    self.builder.timeout,
+                ),
+                Some(addr) => IpHelper::IcmpSendEcho2Ex(
+                    handler,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    addr.to_bits(),
+                    des,
+                    request_data.to_be_bytes().as_ptr() as *mut _,
+                    size_of::<u128>() as _,
+                    request_options,
+                    buf.as_ptr() as *mut _,
+                    buf.len() as _,
+                    self.builder.timeout,
+                ),
             };
             let reply_time = std::time::Instant::now().duration_since(start_time);
             common::check_reply_count(reply_count, handler)?;
@@ -253,9 +225,9 @@ impl PingV6 {
                 Some(info) => Some(info.as_const_ref()),
             };
 
-            let bind_addr = match self.builder.bind_addr {
+            let bind_addr = match &self.builder.bind_addr {
                 None => std::mem::zeroed(),
-                Some(addr) => std::mem::transmute(addr),
+                Some(addr) => std::mem::transmute_copy(addr),
             };
 
             let source_addr = WinSock::SOCKADDR_IN6 {
@@ -286,37 +258,26 @@ impl PingV6 {
                 },
             };
 
-            let start_time = std::time::Instant::now();
-            let reply_count = match &self.builder.window_addition {
-                None => IpHelper::Icmp6SendEcho2(
-                    handler,
-                    None,
-                    None,
-                    None,
-                    &source_addr,
-                    &dest_addr,
-                    request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of::<u128>() as _,
-                    request_options,
-                    buf.as_ptr() as *mut _,
-                    buf.len() as _,
-                    self.builder.timeout,
-                ),
-                Some(addition) => IpHelper::Icmp6SendEcho2(
-                    handler,
-                    addition.event,
-                    addition.apc_routine,
-                    addition.apc_context,
-                    &source_addr,
-                    &dest_addr,
-                    request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of::<u128>() as _,
-                    request_options,
-                    buf.as_ptr() as *mut _,
-                    buf.len() as _,
-                    self.builder.timeout,
-                ),
+            let (event, apc_routine, apc_context) = match &self.builder.window_addition {
+                None => (None, None, None),
+                Some(addition) => (addition.event, addition.apc_routine, addition.apc_context),
             };
+
+            let start_time = std::time::Instant::now();
+            let reply_count = IpHelper::Icmp6SendEcho2(
+                handler,
+                event,
+                apc_routine,
+                apc_context,
+                &source_addr,
+                &dest_addr,
+                request_data.to_be_bytes().as_ptr() as *mut _,
+                size_of::<u128>() as _,
+                request_options,
+                buf.as_ptr() as *mut _,
+                buf.len() as _,
+                self.builder.timeout,
+            );
             let reply_time = std::time::Instant::now().duration_since(start_time);
             common::check_reply_count(reply_count, handler)?;
 

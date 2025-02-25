@@ -1,1 +1,2 @@
-# RustMultiping
+# RPS-PingLib
+
