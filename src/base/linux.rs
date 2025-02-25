@@ -15,6 +15,7 @@ pub enum LinuxError {
     SocketSetupFailed(libc::c_int),
     SetSockOptError(libc::c_int),
 
+    BindFailed(libc::c_int),
     ConnectFailed(libc::c_int),
     SendFailed(libc::c_int),
     SendtoFailed(libc::c_int),
@@ -26,6 +27,50 @@ pub enum LinuxError {
     NullPtr,
 }
 
+impl LinuxError {
+    #[inline]
+    fn convert_recv_failed(input: libc::c_int) -> PingError {
+        match input {
+            101 => PingError::SharedError(SharedError::Unreachable),
+            11 => PingError::SharedError(SharedError::Timeout),
+            _ => {
+                PingError::LinuxError(LinuxError::RecvFailed(input))
+            }
+        }
+    }
+    
+    #[inline]
+    fn convert_bind_failed(input: libc::c_int) -> PingError {
+        match input {
+            1 => PingError::SharedError(SharedError::NoElevatedPrivilege),
+            _ => PingError::LinuxError(LinuxError::BindFailed(input)),
+        }
+    }
+
+    #[inline]
+    pub fn get_errno() -> libc::c_int {
+        unsafe { *libc::__errno_location() }
+    }
+
+    pub fn errno_to_str(err: libc::c_int) -> Option<String> {
+        unsafe {
+            let mut ptr = libc::strerror(err) as *const u8;
+            let mut offset = 0;
+            let mut str = String::with_capacity(55);
+            while (*ptr) != 0 {
+                if offset > 55 || !(*ptr).is_ascii() {
+                    return None;
+                } else {
+                    str.push(*ptr as char);
+                    offset += 1;
+                    ptr = ptr.wrapping_add(1);
+                }
+            }
+            Some(str)
+        }
+    }
+}
+
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> Self {
@@ -35,7 +80,7 @@ impl PingV4 {
     fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if sock == -1 {
-            return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
+            return Err(LinuxError::SocketSetupFailed(LinuxError::get_errno()).into());
         }
 
         {
@@ -54,7 +99,7 @@ impl PingV4 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
+                return Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into());
             }
         }
 
@@ -78,10 +123,7 @@ impl PingV4 {
                     )
                 };
                 if err == -1 {
-                    return Err(SharedError::BindError(PingError::errno_to_str(
-                        PingError::get_errno(),
-                    ))
-                    .into());
+                    return Err(LinuxError::convert_bind_failed(LinuxError::get_errno()));
                 }
             }
         }
@@ -99,7 +141,7 @@ impl PingV4 {
                     )
                 };
                 if err == -1 {
-                    Err(LinuxError::SetSockOptError(PingError::get_errno()).into())
+                    Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into())
                 } else {
                     Ok(sock)
                 }
@@ -125,7 +167,7 @@ impl PingV4 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::ConnectFailed(PingError::get_errno()).into());
+                return Err(LinuxError::ConnectFailed(LinuxError::get_errno()).into());
             }
         }
         let sent = IcmpDataForPing::new_ping_v4();
@@ -139,7 +181,7 @@ impl PingV4 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::SendFailed(PingError::get_errno()).into());
+                return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
             }
         }
         let start_time = std::time::Instant::now();
@@ -156,7 +198,7 @@ impl PingV4 {
             };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
-                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+                return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
             let mut reader = SliceReader::from_slice(buff.as_ref());
             match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
@@ -192,7 +234,7 @@ impl PingV4 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                return Err(LinuxError::SendtoFailed(LinuxError::get_errno()).into());
             }
         }
         let start_time = std::time::Instant::now();
@@ -202,7 +244,7 @@ impl PingV4 {
             let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0) };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
-                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+                return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
             let mut reader = SliceReader::from_slice(buff.as_ref());
             match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
@@ -231,7 +273,7 @@ impl PingV6 {
     fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
         if sock == -1 {
-            return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
+            return Err(LinuxError::SocketSetupFailed(LinuxError::get_errno()).into());
         }
 
         {
@@ -250,7 +292,7 @@ impl PingV6 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
+                return Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into());
             }
         }
 
@@ -273,7 +315,7 @@ impl PingV6 {
                 )
             };
             if err == -1 {
-                Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into())
+                Err(LinuxError::convert_bind_failed(LinuxError::get_errno()))
             } else {
                 Ok(sock)
             }
@@ -299,7 +341,7 @@ impl PingV6 {
                     size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                 );
                 if err == -1 {
-                    return Err(LinuxError::ConnectFailed(PingError::get_errno()).into());
+                    return Err(LinuxError::ConnectFailed(LinuxError::get_errno()).into());
                 }
             }
 
@@ -312,7 +354,7 @@ impl PingV6 {
                     0,
                 );
                 if err == -1 {
-                    return Err(LinuxError::SendFailed(PingError::get_errno()).into());
+                    return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
                 }
             }
             let start_time = std::time::Instant::now();
@@ -327,7 +369,7 @@ impl PingV6 {
                 );
                 let duration = std::time::Instant::now().duration_since(start_time);
                 if len == -1 {
-                    return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+                    return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
                 }
                 Ok(duration)
             }
@@ -362,7 +404,7 @@ impl PingV6 {
                         )
                     };
                     if err == -1 {
-                        return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                        return Err(LinuxError::SendtoFailed(LinuxError::get_errno()).into());
                     }
                 }
                 Some(ttl) => {
@@ -417,7 +459,7 @@ impl PingV6 {
                     };
                     let err = unsafe { libc::sendmsg(sock, &msghdr as *const _ as *const _, 0) };
                     if err == -1 {
-                        return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
+                        return Err(LinuxError::SendMessageFailed(LinuxError::get_errno()).into());
                     }
                 }
             };
@@ -444,7 +486,7 @@ impl PingV6 {
             let len = unsafe { libc::recvmsg(sock, &mut msg as *mut _ as *mut _, 0) };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
-                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+                return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
             if msg.msg_namelen == 0 {
                 return Err(LinuxError::MissRespondAddr.into());
