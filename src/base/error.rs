@@ -59,7 +59,7 @@ impl std::fmt::Debug for PingError {
                         LinuxError::errno_to_str(*str)
                     )
                 }
-                
+
                 LinuxError::BindFailed(str) => {
                     write!(
                         f,
@@ -153,7 +153,11 @@ impl std::fmt::Display for PingError {
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => match e {
                 LinuxError::SocketSetupFailed(str) => {
-                    write!(f, "failed to setup socket: {:?}", LinuxError::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to setup socket: {:?}",
+                        LinuxError::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SetSockOptError(str) => {
                     write!(
@@ -164,7 +168,11 @@ impl std::fmt::Display for PingError {
                 }
 
                 LinuxError::BindFailed(str) => {
-                    write!(f, "failed to bind socket: {:?}", LinuxError::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to bind socket: {:?}",
+                        LinuxError::errno_to_str(*str)
+                    )
                 }
                 LinuxError::ConnectFailed(str) => {
                     write!(
@@ -174,10 +182,18 @@ impl std::fmt::Display for PingError {
                     )
                 }
                 LinuxError::SendFailed(str) => {
-                    write!(f, "failed to send message: {:?}", LinuxError::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to send message: {:?}",
+                        LinuxError::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SendtoFailed(str) => {
-                    write!(f, "failed to send message to a socket: {:?}", LinuxError::errno_to_str(*str))
+                    write!(
+                        f,
+                        "failed to send message to a socket: {:?}",
+                        LinuxError::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SendMessageFailed(str) => {
                     write!(
@@ -207,7 +223,6 @@ impl std::fmt::Display for PingError {
         }
     }
 }
-
 
 pub enum SharedError {
     Timeout,
