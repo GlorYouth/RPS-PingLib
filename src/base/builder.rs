@@ -126,7 +126,7 @@ impl PingV6Builder {
 #[cfg(target_os = "windows")]
 pub struct WindowAddition {
     pub event: Option<windows::Win32::Foundation::HANDLE>,
-    pub apc_routine: Option<windows::Win32::System::IO::PIO_APC_ROUTINE>,
+    pub apc_routine: windows::Win32::System::IO::PIO_APC_ROUTINE,
     pub apc_context: Option<*const core::ffi::c_void>,
     // if you want to use above variables, please read
     // https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho2ex for ipv4

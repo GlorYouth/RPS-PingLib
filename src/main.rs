@@ -6,6 +6,8 @@ fn main() {
         timeout: 200,
         ttl: Some(5),
         bind_addr: None,
+        #[cfg(target_os = "windows")]
+        window_addition: None,
     }
     .build();
     let result = ping
