@@ -60,6 +60,9 @@ impl std::fmt::Debug for PingError {
                     )
                 }
 
+                LinuxError::ResolveRecvFailed => {
+                    write!(f, "PingError::LinuxError(ResolveRecvFailed)")
+                }
                 LinuxError::ConnectFailed(str) => {
                     write!(
                         f,
@@ -172,6 +175,9 @@ impl std::fmt::Display for PingError {
                     )
                 }
 
+                LinuxError::ResolveRecvFailed => {
+                    write!(f, "failed to resolve recv message")
+                }
                 LinuxError::MissRespondAddr => {
                     write!(f, "query target address failed")
                 }

@@ -21,6 +21,7 @@ pub enum LinuxError {
     SendMessageFailed(libc::c_int),
     RecvFailed(libc::c_int),
 
+    ResolveRecvFailed,
     MissRespondAddr,
     NullPtr,
 }
@@ -35,107 +36,113 @@ impl PingV4 {
         &self,
         target: std::net::Ipv4Addr,
     ) -> Result<(std::time::Duration, std::net::Ipv4Addr), PingError> {
-        unsafe {
-            let sock = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP);
-            if sock == -1 {
-                return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
-            }
+        let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
+        if sock == -1 {
+            return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
+        }
 
-            {
-                let millis = self.builder.timeout;
-                let timeval = libc::timeval {
-                    tv_sec: (millis / 1000) as libc::time_t,
-                    tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
-                };
-                let err = libc::setsockopt(
+        {
+            let millis = self.builder.timeout;
+            let timeval = libc::timeval {
+                tv_sec: (millis / 1000) as libc::time_t,
+                tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
+            };
+            let err = unsafe {
+                libc::setsockopt(
                     sock,
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
                     size_of::<libc::timeval>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
             }
+        }
 
-            {
-                let sock_addr = libc::sockaddr_in {
-                    sin_family: libc::AF_INET as u16,
-                    sin_port: 0,
-                    sin_addr: libc::in_addr { s_addr: 0 },
-                    sin_zero: Default::default(),
-                };
+        {
+            let sock_addr = libc::sockaddr_in {
+                sin_family: libc::AF_INET as u16,
+                sin_port: 0,
+                sin_addr: libc::in_addr { s_addr: 0 },
+                sin_zero: Default::default(),
+            };
 
-                let err = libc::bind(
+            let err = unsafe {
+                libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
                     size_of::<libc::sockaddr_in>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    return Err(SharedError::BindError(PingError::errno_to_str(
-                        PingError::get_errno(),
-                    ))
-                    .into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(SharedError::BindError(
+                    PingError::errno_to_str(PingError::get_errno()),
+                )
+                .into());
             }
+        }
 
-            {
-                match self.builder.ttl {
-                    None => {}
-                    Some(ttl) => {
-                        let err = libc::setsockopt(
+        {
+            match self.builder.ttl {
+                None => {}
+                Some(ttl) => {
+                    let err = unsafe {
+                        libc::setsockopt(
                             sock,
                             libc::SOL_IP,
                             libc::IP_TTL,
                             &ttl as *const _ as *const libc::c_void,
                             size_of::<u8>() as libc::socklen_t,
-                        );
-                        if err == -1 {
-                            return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
-                        }
+                        )
+                    };
+                    if err == -1 {
+                        return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
                     }
                 }
             }
+        }
 
-            let sent = IcmpDataForPing::new_ping_v4();
-            {
-                let addr = libc::sockaddr_in {
-                    sin_family: libc::AF_INET as u16,
-                    sin_port: 0,
-                    sin_addr: std::mem::transmute(target),
-                    sin_zero: Default::default(),
-                };
-                let err = libc::sendto(
+        let sent = IcmpDataForPing::new_ping_v4();
+        {
+            let addr = libc::sockaddr_in {
+                sin_family: libc::AF_INET as u16,
+                sin_port: 0,
+                sin_addr: unsafe { std::mem::transmute(target) },
+                sin_zero: Default::default(),
+            };
+            let err = unsafe {
+                libc::sendto(
                     sock,
                     sent.get_inner().as_ptr() as *const _,
                     IcmpDataForPing::DATA_SIZE,
                     0,
                     &addr as *const _ as *const libc::sockaddr,
                     size_of::<libc::sockaddr_in>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
             }
-            let start_time = std::time::Instant::now();
+        }
+        let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; 100];
-            {
-                let len = libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0);
-                let duration = std::time::Instant::now().duration_since(start_time);
-                if len == -1 {
-                    return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
-                }
-                let mut reader = SliceReader::from_slice(buff.as_ref());
-                match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
-                    let format = IcmpFormat::from_header_v4(&header)?;
-                    format.check_is_correspond_v4(&sent)?;
-                    Some(header)
-                }) {
-                    Some(header) => Ok((duration, header.get_source_address())),
-                    None => Err(LinuxError::MissRespondAddr.into()),
-                }
+        let mut buff = [0_u8; 100];
+        {
+            let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0) };
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+            }
+            let mut reader = SliceReader::from_slice(buff.as_ref());
+            match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
+                let format = IcmpFormat::from_header_v4(&header)?;
+                format.check_is_correspond_v4(&sent)?;
+                Some(header)
+            }) {
+                Some(header) => Ok((duration, header.get_source_address())),
+                None => Err(LinuxError::ResolveRecvFailed.into()),
             }
         }
     }
@@ -162,54 +169,58 @@ impl PingV6 {
     }
 
     fn precondition(&self) -> Result<libc::c_int, PingError> {
-        unsafe {
-            let sock = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6);
-            if sock == -1 {
-                return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
-            }
+        let sock = unsafe {
+            libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6)
+        };
+        if sock == -1 {
+            return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
+        }
 
-            {
-                let millis = self.builder.timeout;
-                let timeval = libc::timeval {
-                    tv_sec: (millis / 1000) as libc::time_t,
-                    tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
-                };
-                let err = libc::setsockopt(
+        {
+            let millis = self.builder.timeout;
+            let timeval = libc::timeval {
+                tv_sec: (millis / 1000) as libc::time_t,
+                tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
+            };
+            let err = unsafe {
+                libc::setsockopt(
                     sock,
                     libc::SOL_SOCKET,
                     libc::SO_RCVTIMEO_NEW,
                     &timeval as *const _ as *const libc::c_void,
                     size_of::<libc::timeval>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
             }
+        }
 
-            {
-                let sock_addr = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as u16,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: libc::in6_addr {
-                        s6_addr: Default::default(),
-                    },
-                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-                };
+        {
+            let sock_addr = libc::sockaddr_in6 {
+                sin6_family: libc::AF_INET6 as u16,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: libc::in6_addr {
+                    s6_addr: Default::default(),
+                },
+                sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+            };
 
-                let err = libc::bind(
+            let err = unsafe {
+                libc::bind(
                     sock,
                     &sock_addr as *const _ as *const libc::sockaddr,
                     size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    Err(
-                        SharedError::BindError(PingError::errno_to_str(PingError::get_errno()))
-                            .into(),
-                    )
-                } else {
-                    Ok(sock)
-                }
+                )
+            };
+            if err == -1 {
+                Err(
+                    SharedError::BindError(PingError::errno_to_str(PingError::get_errno()))
+                        .into(),
+                )
+            } else {
+                Ok(sock)
             }
         }
     }
