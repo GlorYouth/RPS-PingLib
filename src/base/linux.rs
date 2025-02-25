@@ -17,7 +17,7 @@ pub enum LinuxError {
 
     ConnectFailed(libc::c_int),
     SendFailed(libc::c_int),
-
+    SendtoFailed(libc::c_int),
     SendMessageFailed(libc::c_int),
     RecvFailed(libc::c_int),
 
@@ -192,12 +192,12 @@ impl PingV4 {
                 )
             };
             if err == -1 {
-                return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
+                return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
             }
         }
         let start_time = std::time::Instant::now();
 
-        let mut buff = [0_u8; 100];
+        let mut buff = [0_u8; 100]; // this buff size should depend on recv ttl exceeded message size, or you want to use libc::recvmsg instead
         {
             let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0) };
             let duration = std::time::Instant::now().duration_since(start_time);
@@ -345,24 +345,32 @@ impl PingV6 {
                 sin6_addr: unsafe { std::mem::transmute(target) },
                 sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
             };
-            let mut iovec = [libc::iovec {
-                iov_base: buff.as_mut_ptr() as *mut _,
-                iov_len: IcmpDataForPing::DATA_SIZE,
-            }];
 
-            let msg = match self.builder.ttl {
-                None => libc::msghdr {
-                    msg_name: &mut addr_v6 as *mut _ as *mut _,
-                    msg_namelen: size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                    msg_iov: &mut iovec as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                },
+            match self.builder.ttl {
+                // 没错, ipv6设置ttl(HopLimit)就是这么繁琐
+                None => {
+                    let err = unsafe {
+                        libc::sendto(
+                            sock,
+                            buff.as_mut_ptr() as *mut _,
+                            IcmpDataForPing::DATA_SIZE,
+                            0,
+                            &mut addr_v6 as *mut _ as *mut _,
+                            size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                        )
+                    };
+                    if err == -1 {
+                        return Err(LinuxError::SendtoFailed(PingError::get_errno()).into());
+                    }
+                }
                 Some(ttl) => {
                     let ttl = ttl as TTL; // use u32, instead you will have to deal with problem in CMSG_LEN API
                     type TTL = u32;
+
+                    let mut iovec = [libc::iovec {
+                        iov_base: buff.as_mut_ptr() as *mut _,
+                        iov_len: IcmpDataForPing::DATA_SIZE,
+                    }];
 
                     const CONTROL_BUFF_LEN: usize =
                         unsafe { libc::CMSG_SPACE(size_of::<TTL>() as _) as usize };
@@ -405,14 +413,12 @@ impl PingV6 {
                             data_ptr
                         })
                     };
-                    msghdr
+                    let err = unsafe { libc::sendmsg(sock, &msghdr as *const _ as *const _, 0) };
+                    if err == -1 {
+                        return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
+                    }
                 }
             };
-
-            let err = unsafe { libc::sendmsg(sock, &msg as *const _ as *const _, 0) };
-            if err == -1 {
-                return Err(LinuxError::SendMessageFailed(PingError::get_errno()).into());
-            }
         }
         let start_time = std::time::Instant::now();
 
@@ -439,6 +445,7 @@ impl PingV6 {
             if msg.msg_namelen == 0 {
                 return Err(LinuxError::MissRespondAddr.into());
             }
+            // todo check_is_correspond_v6
             Ok(PingV6Result {
                 ip: std::net::Ipv6Addr::from(unsafe { addr_v6.assume_init() }.sin6_addr.s6_addr),
                 duration,
