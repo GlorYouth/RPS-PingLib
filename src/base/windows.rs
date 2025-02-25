@@ -27,18 +27,6 @@ pub struct PingV6 {
 
 mod common {
     use super::*;
-    #[cfg(target_pointer_width = "32")]
-    #[inline]
-    pub(super) fn new_ip_option_info(ttl: u8) -> Option<UnMut<IP_OPTION_INFORMATION32>> {
-        Some(UnMut::new(IP_OPTION_INFORMATION32 {
-            Ttl: ttl,
-            Tos: 0,
-            Flags: 0,
-            OptionsSize: 0,
-            OptionsData: null_mut(),
-        }))
-    }
-
 
     #[inline]
     pub(super) fn check_reply_count(count: u32, handler: Foundation::HANDLE) -> Result<(), PingError> {
