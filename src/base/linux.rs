@@ -32,10 +32,7 @@ impl PingV4 {
         Self { builder }
     }
 
-    fn get_reply(
-        &self,
-        target: std::net::Ipv4Addr,
-    ) -> Result<libc::c_int, PingError> {
+    fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if sock == -1 {
             return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
@@ -62,12 +59,14 @@ impl PingV4 {
         }
 
         match self.builder.bind_addr {
-            None => {},
+            None => {}
             Some(addr) => {
                 let sock_addr = libc::sockaddr_in {
                     sin_family: libc::AF_INET as u16,
                     sin_port: 0,
-                    sin_addr: libc::in_addr { s_addr: addr.to_bits() },
+                    sin_addr: libc::in_addr {
+                        s_addr: addr.to_bits(),
+                    },
                     sin_zero: Default::default(),
                 };
 
@@ -79,10 +78,10 @@ impl PingV4 {
                     )
                 };
                 if err == -1 {
-                    return Err(SharedError::BindError(
-                        PingError::errno_to_str(PingError::get_errno()),
-                    )
-                        .into());
+                    return Err(SharedError::BindError(PingError::errno_to_str(
+                        PingError::get_errno(),
+                    ))
+                    .into());
                 }
             }
         }
@@ -110,7 +109,7 @@ impl PingV4 {
 
     #[inline]
     pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
-        let sock = self.get_reply(target)?;
+        let sock = self.precondition()?;
         {
             let addr = libc::sockaddr_in {
                 sin_family: libc::AF_INET as u16,
@@ -147,7 +146,14 @@ impl PingV4 {
 
         let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
         {
-            let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, IcmpDataForPing::DATA_SIZE, 0) };
+            let len = unsafe {
+                libc::recv(
+                    sock,
+                    buff.as_mut_ptr() as *mut _,
+                    IcmpDataForPing::DATA_SIZE,
+                    0,
+                )
+            };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
                 return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
@@ -166,7 +172,7 @@ impl PingV4 {
 
     #[inline]
     pub fn ping_in_detail(&self, target: std::net::Ipv4Addr) -> Result<PingV4Result, PingError> {
-        let sock = self.get_reply(target)?;
+        let sock = self.precondition()?;
         let sent = IcmpDataForPing::new_ping_v4();
         {
             let addr = libc::sockaddr_in {
@@ -221,9 +227,7 @@ impl PingV6 {
     }
 
     fn precondition(&self) -> Result<libc::c_int, PingError> {
-        let sock = unsafe {
-            libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6)
-        };
+        let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
         if sock == -1 {
             return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
         }
@@ -267,10 +271,7 @@ impl PingV6 {
                 )
             };
             if err == -1 {
-                Err(
-                    SharedError::BindError(PingError::errno_to_str(PingError::get_errno()))
-                        .into(),
-                )
+                Err(SharedError::BindError(PingError::errno_to_str(PingError::get_errno())).into())
             } else {
                 Ok(sock)
             }
