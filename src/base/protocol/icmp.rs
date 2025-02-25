@@ -73,21 +73,11 @@ impl IcmpDataForPing {
     pub fn get_inner_mut(&mut self) -> &mut [u8; IcmpDataForPing::DATA_SIZE] {
         &mut self.data
     }
-
-    #[inline]
-    pub fn into_inner(self) -> [u8; IcmpDataForPing::DATA_SIZE] {
-        self.data
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        self.data.as_ref()
-    }
 }
 
 pub struct IcmpFormat<'a> {
     icmp_type: u8,
-    code: u8,
+    // code: u8,
     checksum: u16,
     other_data: &'a [u8],
 }
@@ -99,7 +89,7 @@ impl<'a> IcmpFormat<'a> {
         } else {
             Some(IcmpFormat {
                 icmp_type: slice[0],
-                code: slice[1],
+                // code: slice[1],
                 checksum: u16::from_be_bytes(slice[2..4].try_into().unwrap()),
                 other_data: &slice[4..],
             })
@@ -111,17 +101,17 @@ impl<'a> IcmpFormat<'a> {
         IcmpFormat::from_slice(header.get_payload())
     }
 
-    #[inline]
-    pub fn icmp_type(&self) -> u8 {
-        self.icmp_type
-    }
+    // #[inline]
+    // pub fn icmp_type(&self) -> u8 {
+    //     self.icmp_type
+    // }
 
     pub fn check_is_correspond_v4(&self, data: &IcmpDataForPing) -> Option<()> {
         match (data.icmp_type(), self.icmp_type) {
             (8, 0) => self.other_data[2..].eq(&data.data[6..]).then_some(()),
             (8, 11) => {
                 // Time to live exceeded
-                Ipv4Header::from_slice_uncheck(&self.other_data[4..]) // 使用uncheck的原因是部分Time to live exceeded响应并未传递ICMP请求的Data部分非序列号和识别部分
+                Ipv4Header::from_slice(&self.other_data[4..]) // 使用uncheck的原因是部分Time to live exceeded响应并未传递ICMP请求的Data部分非序列号和识别部分
                     .and_then(|header| IcmpFormat::from_header_v4(&header))
                     .and_then(|icmp| {
                         // 直接比较checksum,因为有部分响应实现并未传递其余部分

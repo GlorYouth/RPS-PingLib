@@ -75,7 +75,10 @@ impl PingV4 {
     }
 
     fn precondition(&self) -> Result<libc::c_int, PingError> {
+        #[cfg(not(feature = "DGRAM_SOCKET"))]
         let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
+        #[cfg(feature = "DGRAM_SOCKET")]
+        let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP) };
         if sock == -1 {
             return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
@@ -183,7 +186,7 @@ impl PingV4 {
         }
         let start_time = std::time::Instant::now();
 
-        let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
+        let mut buff = std::mem::MaybeUninit::<[u8; IcmpDataForPing::DATA_SIZE]>::uninit();
         {
             let len = unsafe {
                 libc::recv(
@@ -197,7 +200,7 @@ impl PingV4 {
             if len == -1 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
-            Ipv4Header::from_slice(&buff.as_ref()[..len as usize])
+            Ipv4Header::from_slice(&unsafe { buff.assume_init_ref() }[..len as usize])
                 .and_then(|header| {
                     let format = IcmpFormat::from_header_v4(&header)?;
                     format.check_is_correspond_v4(&sent)?;
@@ -234,14 +237,18 @@ impl PingV4 {
         }
         let start_time = std::time::Instant::now();
 
-        let mut buff = [0_u8; 100]; // this buff size should depend on recv ttl exceeded message size, or you want to use libc::recvmsg instead
+        const SIZE_OF_BUFF: usize = IcmpDataForPing::DATA_SIZE + 38;
+        let mut buff = std::mem::MaybeUninit::<[u8; SIZE_OF_BUFF]>::uninit();
+        // this buff size should depend on recv ttl exceeded message size, or you want to use libc::recvmsg instead
+        // let us calculate the buff size: 4 as ICMP header fix size + 4 as unused size in ICMP data + 20 as Ipv4Header fix size + IcmpDataForPing::DATA_SIZE + 10 as Safety
+        //          = IcmpDataForPing::DATA_SIZE + 38
         {
-            let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, 100, 0) };
+            let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, SIZE_OF_BUFF, 0) };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
-            Ipv4Header::from_slice(&buff.as_ref()[..len as usize])
+            Ipv4Header::from_slice(&unsafe { buff.assume_init_ref() }[..len as usize])
                 .and_then(|header| {
                     let format = IcmpFormat::from_header_v4(&header)?;
                     format.check_is_correspond_v4(&sent)?;
@@ -264,7 +271,11 @@ impl PingV6 {
     // APIs are so different between Ipv4 socket and Ipv6 socket, so many codes are different
 
     fn precondition(&self) -> Result<libc::c_int, PingError> {
+        #[cfg(not(feature = "DGRAM_SOCKET"))]
         let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
+        #[cfg(feature = "DGRAM_SOCKET")]
+        let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, libc::IPPROTO_ICMPV6) };
+
         if sock == -1 {
             return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
@@ -319,53 +330,60 @@ impl PingV6 {
     pub fn ping(&self, target: std::net::Ipv6Addr) -> Result<std::time::Duration, PingError> {
         let sock = self.precondition()?;
 
-        unsafe {
-            {
-                let addr = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as u16,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: std::mem::transmute(target),
-                    sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-                };
-                let err = libc::connect(
+        {
+            let addr = libc::sockaddr_in6 {
+                sin6_family: libc::AF_INET6 as u16,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: unsafe { std::mem::transmute(target) },
+                sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
+            };
+            let err = unsafe {
+                libc::connect(
                     sock,
                     &addr as *const _ as *const libc::sockaddr,
                     size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                );
-                if err == -1 {
-                    return Err(LinuxError::ConnectFailed(LinuxError::get_errno()).into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::ConnectFailed(LinuxError::get_errno()).into());
             }
+        }
 
-            let sent = IcmpDataForPing::new_ping_v6().into_inner();
-            {
-                let err = libc::send(
+        let sent = IcmpDataForPing::new_ping_v6();
+        {
+            let err = unsafe {
+                libc::send(
                     sock,
-                    sent.as_ptr() as *const _,
+                    sent.get_inner().as_ptr() as *const _,
                     IcmpDataForPing::DATA_SIZE,
                     0,
-                );
-                if err == -1 {
-                    return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
-                }
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
             }
-            let start_time = std::time::Instant::now();
+        }
+        let start_time = std::time::Instant::now();
 
-            let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
-            {
-                let len = libc::recv(
+        let mut buff = std::mem::MaybeUninit::<[u8; IcmpDataForPing::DATA_SIZE]>::uninit();
+        {
+            let len = unsafe {
+                libc::recv(
                     sock,
                     buff.as_mut_ptr() as *mut _,
                     IcmpDataForPing::DATA_SIZE,
                     0,
-                );
-                let duration = std::time::Instant::now().duration_since(start_time);
-                if len == -1 {
-                    return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
-                }
-                Ok(duration)
+                )
+            };
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
+            IcmpFormat::from_slice(unsafe { buff.assume_init_ref() })
+                .and_then(|format| format.check_is_correspond_v6(&sent))
+                .map(|_| duration)
+                .ok_or(LinuxError::ResolveRecvFailed.into())
         }
     }
 
@@ -459,12 +477,15 @@ impl PingV6 {
         }
         let start_time = std::time::Instant::now();
 
-        let mut buff: std::mem::MaybeUninit<[u8; 100]> = std::mem::MaybeUninit::new([0; 100]);
+        // let us calculate the buff size: 4 as ICMPv6 header fix size + 4 as unused size in ICMPv6 data + 40 as Ipv6Header fix size + IcmpDataForPing::DATA_SIZE + 10 as Safety
+        //          = IcmpDataForPing::DATA_SIZE + 58
+        const SIZE_OF_BUFF: usize = IcmpDataForPing::DATA_SIZE + 58;
+        let mut buff: std::mem::MaybeUninit<[u8; SIZE_OF_BUFF]> = std::mem::MaybeUninit::uninit();
         {
             let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
             let mut iovec = [libc::iovec {
                 iov_base: buff.as_mut_ptr() as *mut _,
-                iov_len: 100,
+                iov_len: SIZE_OF_BUFF,
             }];
             let mut msg = libc::msghdr {
                 msg_name: addr_v6.as_mut_ptr() as *mut _,
@@ -485,14 +506,20 @@ impl PingV6 {
             if msg.msg_namelen == 0 {
                 return Err(LinuxError::MissRespondAddr.into());
             }
-            // len 可能大于实际数组上界
-            IcmpFormat::from_slice(&unsafe { buff.assume_init_ref() }[..len as usize])
+            let len = if len > SIZE_OF_BUFF as isize {
+                SIZE_OF_BUFF
+            } else {
+                len as usize
+            };
+            IcmpFormat::from_slice(&unsafe { buff.assume_init_ref() }[..len])
                 .and_then(|format| format.check_is_correspond_v6(&sent))
-                .ok_or(LinuxError::ResolveRecvFailed)?;
-            Ok(PingV6Result {
-                ip: std::net::Ipv6Addr::from(unsafe { addr_v6.assume_init() }.sin6_addr.s6_addr),
-                duration,
-            })
+                .map(|_| PingV6Result {
+                    ip: std::net::Ipv6Addr::from(
+                        unsafe { addr_v6.assume_init() }.sin6_addr.s6_addr,
+                    ),
+                    duration,
+                })
+                .ok_or(LinuxError::ResolveRecvFailed.into())
         }
     }
 }

@@ -1,3 +1,4 @@
+#[allow(unused)]
 use multi_ping::{PingV4Builder, PingV6Builder};
 
 fn main() {
