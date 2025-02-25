@@ -1,7 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
 use crate::base::protocol::{IcmpDataForPing, IcmpFormat, Ipv4Header};
-use crate::base::utils::SliceReader;
 use crate::{PingV4Result, PingV6Result};
 pub struct PingV4 {
     builder: PingV4Builder,
@@ -198,8 +197,7 @@ impl PingV4 {
             if len == -1 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
-            let mut reader = SliceReader::from_slice(buff.as_ref());
-            Ipv4Header::from_reader(&mut reader, len as u16)
+            Ipv4Header::from_slice(&buff.as_ref()[..len as usize])
                 .and_then(|header| {
                     let format = IcmpFormat::from_header_v4(&header)?;
                     format.check_is_correspond_v4(&sent)?;
@@ -243,8 +241,7 @@ impl PingV4 {
             if len == -1 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
-            let mut reader = SliceReader::from_slice(buff.as_ref());
-            Ipv4Header::from_reader(&mut reader, len as u16)
+            Ipv4Header::from_slice(&buff.as_ref()[..len as usize])
                 .and_then(|header| {
                     let format = IcmpFormat::from_header_v4(&header)?;
                     format.check_is_correspond_v4(&sent)?;

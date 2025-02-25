@@ -1,5 +1,4 @@
 use crate::base::protocol::{Ipv4Header, Ipv6Header};
-use crate::base::utils::SliceReader;
 use rand::Rng;
 
 pub struct IcmpDataForPing {
@@ -94,20 +93,7 @@ pub struct IcmpFormat<'a> {
 }
 
 impl<'a> IcmpFormat<'a> {
-    pub fn from_reader(reader: &mut SliceReader<'a>, total_len: u8) -> Option<IcmpFormat<'a>> {
-        if reader.pos() - reader.len() < total_len as usize {
-            None
-        } else {
-            Some(IcmpFormat {
-                icmp_type: reader.read_u8(),
-                code: reader.read_u8(),
-                checksum: reader.read_u16(),
-                other_data: reader.read_slice(total_len as usize - 4),
-            })
-        }
-    }
-
-    pub fn from_slice<'b: 'a>(slice: &'b [u8]) -> Option<IcmpFormat<'a>> {
+    pub fn from_slice(slice: &[u8]) -> Option<IcmpFormat<'_>> {
         if slice.len() < 4 {
             None
         } else {
