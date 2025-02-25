@@ -102,16 +102,11 @@ pub struct Ipv6Header<'a> {
 impl<'a> Ipv6Header<'a> {
     pub const FIXED_HEADER_SIZE: u16 = 40;
 
-    pub fn from_reader<'b: 'a>(
-        reader: &mut SliceReader<'b>,
-        total_len: u16,
-    ) -> Option<Ipv6Header<'a>> {
-        if reader.len() < total_len as usize || total_len < Self::FIXED_HEADER_SIZE {
-            return None;
-        }
-        let fix_slice = reader.read_slice(Self::FIXED_HEADER_SIZE as usize);
+    pub fn from_slice(slice: &'a [u8]) -> Option<Ipv6Header<'a>> {
+        let (fix_slice, mut other_slice) =
+            slice.split_at_checked(Self::FIXED_HEADER_SIZE as usize)?;
         let payload_length = u16::from_be_bytes(fix_slice[4..6].try_into().unwrap());
-        if payload_length + Self::FIXED_HEADER_SIZE < total_len {
+        if payload_length + Self::FIXED_HEADER_SIZE < slice.len() as u16 {
             return None;
         }
         let mut next_header_type = fix_slice[6];
@@ -119,16 +114,16 @@ impl<'a> Ipv6Header<'a> {
         loop {
             match Ipv6HeaderType::new(next_header_type) {
                 Ipv6HeaderType::Options(u) => {
-                    next_header_type = reader.peek_u8();
-                    let length = reader.as_ref()[reader.pos() + 1];
-                    payload_slice_vec.push((
-                        u,
-                        reader.read_slice(Self::alignment_u8_size(length) as usize),
-                    ));
+                    next_header_type = other_slice[0];
+                    let length = other_slice[1];
+                    let slice;
+                    (slice, other_slice) =
+                        other_slice.split_at_checked(Self::alignment_u8_size(length) as usize)?;
+                    payload_slice_vec.push((u, slice));
                     continue;
                 }
                 Ipv6HeaderType::Uppers(_) => {
-                    payload_slice_vec.push((next_header_type, reader.remainder()));
+                    payload_slice_vec.push((next_header_type, other_slice));
                     return Some(Ipv6Header {
                         fix_slice,
                         payload_slice_vec,
@@ -241,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_ipv6_header() {
-        let slice = [
+        let mut slice = [
             0x60, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x01, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0x02, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x3a, 0x00,
@@ -249,8 +244,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00,
         ];
-        let mut reader = SliceReader::from_slice(&slice);
-        let header = Ipv6Header::from_reader(&mut reader, slice.len() as u16).unwrap();
+        let header = Ipv6Header::from_slice(&mut slice).unwrap();
         assert_eq!(
             header.fix_slice,
             &[

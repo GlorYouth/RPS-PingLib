@@ -1,4 +1,4 @@
-use crate::base::protocol::Ipv4Header;
+use crate::base::protocol::{Ipv4Header, Ipv6Header};
 use crate::base::utils::SliceReader;
 use rand::Rng;
 
@@ -68,6 +68,11 @@ impl IcmpDataForPing {
     #[inline]
     pub fn get_inner(&self) -> &[u8; IcmpDataForPing::DATA_SIZE] {
         &self.data
+    }
+
+    #[inline]
+    pub fn get_inner_mut(&mut self) -> &mut [u8; IcmpDataForPing::DATA_SIZE] {
+        &mut self.data
     }
 
     #[inline]
@@ -146,9 +151,9 @@ impl<'a> IcmpFormat<'a> {
     pub fn check_is_correspond_v6(&self, data: &IcmpDataForPing) -> Option<()> {
         match (data.icmp_type(), self.icmp_type) {
             (128, 129) => self.other_data[2..].eq(&data.data[6..]).then_some(()),
-            (128, 130) => {
-                todo!()
-            }
+            (128, 3) => Ipv6Header::from_slice(&self.other_data[4..])
+                .and_then(|header| IcmpFormat::from_slice(header.get_payload()?))
+                .and_then(|format| format.other_data[2..].eq(&data.data[6..]).then_some(())),
             _ => None,
         }
     }

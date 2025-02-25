@@ -3,7 +3,7 @@ use multi_ping::{PingV4Builder, PingV6Builder};
 fn main() {
     let ping = PingV6Builder {
         timeout: 200,
-        ttl: Some(100),
+        ttl: Some(1),
         bind_addr: None,
         scope_id_option: None,
         #[cfg(target_os = "windows")]

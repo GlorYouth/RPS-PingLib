@@ -199,14 +199,13 @@ impl PingV4 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
             let mut reader = SliceReader::from_slice(buff.as_ref());
-            match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
-                let format = IcmpFormat::from_header_v4(&header)?;
-                format.check_is_correspond_v4(&sent)?;
-                Some(())
-            }) {
-                Some(_) => Ok(duration),
-                None => Err(LinuxError::ResolveRecvFailed.into()),
-            }
+            Ipv4Header::from_reader(&mut reader, len as u16)
+                .and_then(|header| {
+                    let format = IcmpFormat::from_header_v4(&header)?;
+                    format.check_is_correspond_v4(&sent)?;
+                    Some(duration)
+                })
+                .ok_or(LinuxError::ResolveRecvFailed.into())
         }
     }
 
@@ -245,17 +244,16 @@ impl PingV4 {
                 return Err(LinuxError::convert_recv_failed(LinuxError::get_errno()));
             }
             let mut reader = SliceReader::from_slice(buff.as_ref());
-            match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
-                let format = IcmpFormat::from_header_v4(&header)?;
-                format.check_is_correspond_v4(&sent)?;
-                Some(header)
-            }) {
-                Some(header) => Ok(PingV4Result {
-                    ip: header.get_source_address(),
-                    duration,
-                }),
-                None => Err(LinuxError::ResolveRecvFailed.into()),
-            }
+            Ipv4Header::from_reader(&mut reader, len as u16)
+                .and_then(|header| {
+                    let format = IcmpFormat::from_header_v4(&header)?;
+                    format.check_is_correspond_v4(&sent)?;
+                    Some(PingV4Result {
+                        ip: header.get_source_address(),
+                        duration,
+                    })
+                })
+                .ok_or(LinuxError::ResolveRecvFailed.into())
         }
     }
 }
@@ -378,7 +376,7 @@ impl PingV6 {
     pub fn ping_in_detail(&self, target: std::net::Ipv6Addr) -> Result<PingV6Result, PingError> {
         let sock = self.precondition()?;
 
-        let mut buff = IcmpDataForPing::new_ping_v6().into_inner();
+        let mut sent = IcmpDataForPing::new_ping_v6();
         {
             let mut addr_v6 = libc::sockaddr_in6 {
                 sin6_family: libc::AF_INET6 as u16,
@@ -394,7 +392,7 @@ impl PingV6 {
                     let err = unsafe {
                         libc::sendto(
                             sock,
-                            buff.as_mut_ptr() as *mut _,
+                            sent.get_inner_mut().as_mut_ptr() as *mut _,
                             IcmpDataForPing::DATA_SIZE,
                             0,
                             &mut addr_v6 as *mut _ as *mut _,
@@ -410,7 +408,7 @@ impl PingV6 {
                     type TTL = u32;
 
                     let mut iovec = [libc::iovec {
-                        iov_base: buff.as_mut_ptr() as *mut _,
+                        iov_base: sent.get_inner_mut().as_mut_ptr() as *mut _,
                         iov_len: IcmpDataForPing::DATA_SIZE,
                     }];
 
@@ -464,11 +462,12 @@ impl PingV6 {
         }
         let start_time = std::time::Instant::now();
 
+        let mut buff: std::mem::MaybeUninit<[u8; 100]> = std::mem::MaybeUninit::new([0; 100]);
         {
             let mut addr_v6 = std::mem::MaybeUninit::<libc::sockaddr_in6>::uninit();
             let mut iovec = [libc::iovec {
                 iov_base: buff.as_mut_ptr() as *mut _,
-                iov_len: IcmpDataForPing::DATA_SIZE,
+                iov_len: 100,
             }];
             let mut msg = libc::msghdr {
                 msg_name: addr_v6.as_mut_ptr() as *mut _,
@@ -489,7 +488,10 @@ impl PingV6 {
             if msg.msg_namelen == 0 {
                 return Err(LinuxError::MissRespondAddr.into());
             }
-            // todo check_is_correspond_v6
+            // len 可能大于实际数组上界
+            IcmpFormat::from_slice(&unsafe { buff.assume_init_ref() }[..len as usize])
+                .and_then(|format| format.check_is_correspond_v6(&sent))
+                .ok_or(LinuxError::ResolveRecvFailed)?;
             Ok(PingV6Result {
                 ip: std::net::Ipv6Addr::from(unsafe { addr_v6.assume_init() }.sin6_addr.s6_addr),
                 duration,
