@@ -226,6 +226,8 @@ impl PingV6 {
         Self { builder }
     }
 
+    // APIs are so different between Ipv4 socket and Ipv6 socket, so many codes are different
+    
     fn precondition(&self) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
         if sock == -1 {
@@ -437,6 +439,8 @@ impl PingV6 {
                 msg_controllen: 0,
                 msg_flags: 0,
             };
+            
+            // if you don't use recvmsg, you can't get source socketaddr
             let len = unsafe { libc::recvmsg(sock, &mut msg as *mut _ as *mut _, 0) };
             let duration = std::time::Instant::now().duration_since(start_time);
             if len == -1 {
