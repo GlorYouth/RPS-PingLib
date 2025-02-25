@@ -1,5 +1,5 @@
 #[allow(unused)]
-use multi_ping::{PingV4Builder, PingV6Builder};
+use rps_ping_lib::{PingV4Builder, PingV6Builder};
 
 fn main() {
     let ping = PingV4Builder {

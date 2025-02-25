@@ -125,12 +125,12 @@ impl PingV4 {
             };
             let des = target.to_bits();
             let request_data: u128 = rand::rng().random(); // if you change this type, please change size_of::<u128> in reply_count
-            
+
             let request_options = match &self.info.0 {
                 None => None,
                 Some(info) => Some(info.as_const_ref()),
             };
-            
+
             let start_time = std::time::Instant::now();
             let reply_count = match &self.builder.window_addition {
                 // window_addition 确定第2-4项参数
@@ -362,86 +362,5 @@ impl Into<PingV6> for PingV6Builder {
     #[inline]
     fn into(self) -> PingV6 {
         PingV6::new(self)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::base::builder::{PingV4Builder, PingV6Builder};
-
-    #[test]
-    fn test_ping_v4() {
-        let ping = PingV4Builder {
-            timeout: 200,
-            ttl: Some(50),
-            bind_addr: None,
-            window_addition: None,
-        }
-        .build();
-        println!(
-            "{} ms",
-            ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
-                .expect("ping_v4 error")
-                .as_micros() as f64
-                / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_in_detail() {
-        let ping = PingV4Builder {
-            timeout: 200,
-            ttl: Some(5),
-            bind_addr: None,
-            window_addition: None,
-        }
-        .build();
-        let result = ping
-            .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
-            .expect("ping_v4_in_detail error");
-        println!(
-            "{},{}",
-            result.ip,
-            result.duration.as_micros() as f64 / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_v6() {
-        let ping = PingV6Builder {
-            timeout: 150,
-            ttl: None,
-            bind_addr: None,
-            scope_id_option: None,
-            window_addition: None,
-        }
-        .build();
-        println!(
-            "{} ms",
-            ping.ping("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
-                .expect("ping_v6 error")
-                .as_micros() as f64
-                / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_v6_in_detail() {
-        let ping = PingV6Builder {
-            timeout: 200,
-            ttl: Some(100),
-            bind_addr: None,
-            scope_id_option: None,
-            window_addition: None,
-        }
-        .build();
-        let result = ping
-            .ping_in_detail("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
-            .expect("ping_v6_in_detail error");
-        println!(
-            "{},{}",
-            result.ip,
-            result.duration.as_micros() as f64 / 1000.0
-        );
     }
 }

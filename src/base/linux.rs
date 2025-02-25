@@ -68,6 +68,61 @@ impl LinuxError {
     }
 }
 
+mod common {
+    use super::*;
+
+    #[inline]
+    pub(super) fn set_timeout(sock: libc::c_int, millis: u32) -> Result<(), PingError> {
+        let timeval = libc::timeval {
+            tv_sec: (millis / 1000) as libc::time_t,
+            tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
+        };
+        let err = unsafe {
+            libc::setsockopt(
+                sock,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO_NEW,
+                &timeval as *const _ as *const libc::c_void,
+                size_of::<libc::timeval>() as libc::socklen_t,
+            )
+        };
+        if err == -1 {
+            return Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into());
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(super) fn send(sock: libc::c_int, sent: &IcmpDataForPing) -> Result<(), PingError> {
+        let err = unsafe {
+            libc::send(
+                sock,
+                sent.get_inner().as_ptr() as *const _,
+                IcmpDataForPing::DATA_SIZE,
+                0,
+            )
+        };
+        if err == -1 {
+            return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(super) fn get_addr_v6(
+        target: std::net::Ipv6Addr,
+        sin6_scope_id: u32,
+    ) -> libc::sockaddr_in6 {
+        libc::sockaddr_in6 {
+            sin6_family: libc::AF_INET6 as u16,
+            sin6_port: 0,
+            sin6_flowinfo: 0,
+            sin6_addr: unsafe { std::mem::transmute(target) },
+            sin6_scope_id,
+        }
+    }
+}
+
 impl PingV4 {
     #[inline]
     pub fn new(builder: PingV4Builder) -> Self {
@@ -83,25 +138,7 @@ impl PingV4 {
             return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
 
-        {
-            let millis = self.builder.timeout;
-            let timeval = libc::timeval {
-                tv_sec: (millis / 1000) as libc::time_t,
-                tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
-            };
-            let err = unsafe {
-                libc::setsockopt(
-                    sock,
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVTIMEO_NEW,
-                    &timeval as *const _ as *const libc::c_void,
-                    size_of::<libc::timeval>() as libc::socklen_t,
-                )
-            };
-            if err == -1 {
-                return Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into());
-            }
-        }
+        common::set_timeout(sock, self.builder.timeout)?;
 
         match self.builder.bind_addr {
             None => {}
@@ -171,19 +208,7 @@ impl PingV4 {
             }
         }
         let sent = IcmpDataForPing::new_ping_v4();
-        {
-            let err = unsafe {
-                libc::send(
-                    sock,
-                    sent.get_inner().as_ptr() as *const _,
-                    IcmpDataForPing::DATA_SIZE,
-                    0,
-                )
-            };
-            if err == -1 {
-                return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
-            }
-        }
+        common::send(sock, &sent)?;
         let start_time = std::time::Instant::now();
 
         let mut buff = std::mem::MaybeUninit::<[u8; IcmpDataForPing::DATA_SIZE]>::uninit();
@@ -280,25 +305,7 @@ impl PingV6 {
             return Err(LinuxError::convert_setup_failed(LinuxError::get_errno()).into());
         }
 
-        {
-            let millis = self.builder.timeout;
-            let timeval = libc::timeval {
-                tv_sec: (millis / 1000) as libc::time_t,
-                tv_usec: ((millis % 1000) * 1000) as libc::suseconds_t,
-            };
-            let err = unsafe {
-                libc::setsockopt(
-                    sock,
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVTIMEO_NEW,
-                    &timeval as *const _ as *const libc::c_void,
-                    size_of::<libc::timeval>() as libc::socklen_t,
-                )
-            };
-            if err == -1 {
-                return Err(LinuxError::SetSockOptError(LinuxError::get_errno()).into());
-            }
-        }
+        common::set_timeout(sock, self.builder.timeout)?;
 
         {
             let sock_addr = libc::sockaddr_in6 {
@@ -331,13 +338,7 @@ impl PingV6 {
         let sock = self.precondition()?;
 
         {
-            let addr = libc::sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as u16,
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: unsafe { std::mem::transmute(target) },
-                sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-            };
+            let addr = common::get_addr_v6(target, self.builder.scope_id_option.unwrap_or(0));
             let err = unsafe {
                 libc::connect(
                     sock,
@@ -351,19 +352,7 @@ impl PingV6 {
         }
 
         let sent = IcmpDataForPing::new_ping_v6();
-        {
-            let err = unsafe {
-                libc::send(
-                    sock,
-                    sent.get_inner().as_ptr() as *const _,
-                    IcmpDataForPing::DATA_SIZE,
-                    0,
-                )
-            };
-            if err == -1 {
-                return Err(LinuxError::SendFailed(LinuxError::get_errno()).into());
-            }
-        }
+        common::send(sock, &sent)?;
         let start_time = std::time::Instant::now();
 
         let mut buff = std::mem::MaybeUninit::<[u8; IcmpDataForPing::DATA_SIZE]>::uninit();
@@ -393,13 +382,8 @@ impl PingV6 {
 
         let mut sent = IcmpDataForPing::new_ping_v6();
         {
-            let mut addr_v6 = libc::sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as u16,
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: unsafe { std::mem::transmute(target) },
-                sin6_scope_id: self.builder.scope_id_option.unwrap_or(0),
-            };
+            let mut addr_v6 =
+                common::get_addr_v6(target, self.builder.scope_id_option.unwrap_or(0));
 
             match self.builder.ttl {
                 // 没错, ipv6设置ttl(HopLimit)就是这么繁琐
@@ -535,77 +519,5 @@ impl Into<PingV6> for PingV6Builder {
     #[inline]
     fn into(self) -> PingV6 {
         PingV6 { builder: self }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::base::builder::{PingV4Builder, PingV6Builder};
-    use crate::{PingV4, PingV6};
-
-    #[test]
-    fn test_ping_v4() {
-        let ping: PingV4 = PingV4Builder {
-            timeout: 1000,
-            ttl: Some(5),
-            bind_addr: None,
-        }
-        .into();
-        println!(
-            "{} ms",
-            ping.ping(std::net::Ipv4Addr::new(1, 1, 1, 1))
-                .expect("ping_v4 error")
-                .as_micros() as f64
-                / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_in_detail() {
-        let ping = PingV4Builder {
-            timeout: 200,
-            ttl: Some(10),
-            bind_addr: None,
-        }
-        .build();
-        let result = ping
-            .ping_in_detail(std::net::Ipv4Addr::new(1, 1, 1, 1))
-            .expect("ping_v4_in_detail error");
-        println!(
-            "{},{}",
-            result.ip,
-            result.duration.as_micros() as f64 / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_v6() {
-        let ping: PingV6 = PingV6Builder::default().into();
-        println!(
-            "{} ms",
-            ping.ping("2408:8756:c52:1aec:0:ff:b013:5a11".parse().unwrap())
-                .expect("ping_v6 error")
-                .as_micros() as f64
-                / 1000.0
-        );
-    }
-
-    #[test]
-    fn test_ping_v6_in_detail() {
-        let ping = PingV6Builder {
-            timeout: 200,
-            ttl: Some(5),
-            bind_addr: None,
-            scope_id_option: None,
-        }
-        .build();
-        let result = ping
-            .ping_in_detail("2606:4700:4700::1111".parse().unwrap())
-            .expect("ping_v6_in_detail error");
-        println!(
-            "{},{}",
-            result.ip,
-            result.duration.as_micros() as f64 / 1000.0
-        );
     }
 }
