@@ -132,9 +132,38 @@ impl PingV4 {
             };
 
             let start_time = std::time::Instant::now();
-            let reply_count = match &self.builder.window_addition {
-                // window_addition 确定第2-4项参数
-                None => match self.builder.bind_addr {
+            let reply_count = self.builder.window_addition.as_ref().map(|addition| {
+                match self.builder.bind_addr {
+                    None => IpHelper::IcmpSendEcho2(
+                        handler,
+                        addition.event,
+                        addition.apc_routine,
+                        addition.apc_context,
+                        des,
+                        request_data.to_be_bytes().as_ptr() as *mut _,
+                        size_of::<u128>() as _,
+                        request_options,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
+                        self.builder.timeout,
+                    ),
+                    Some(addr) => IpHelper::IcmpSendEcho2Ex(
+                        handler,
+                        addition.event,
+                        addition.apc_routine,
+                        addition.apc_context,
+                        addr.to_bits(),
+                        des,
+                        request_data.to_be_bytes().as_ptr() as *mut _,
+                        size_of::<u128>() as _,
+                        request_options,
+                        buf.as_ptr() as *mut _,
+                        buf.len() as _,
+                        self.builder.timeout,
+                    ),
+                }
+            }).unwrap_or_else(|| {
+                match self.builder.bind_addr {
                     // bind_addr确定调用方法是否有原地址
                     None => IpHelper::IcmpSendEcho2(
                         handler,
@@ -163,37 +192,8 @@ impl PingV4 {
                         buf.len() as _,
                         self.builder.timeout,
                     ),
-                },
-                Some(addition) => match self.builder.bind_addr {
-                    None => IpHelper::IcmpSendEcho2(
-                        handler,
-                        addition.event,
-                        addition.apc_routine,
-                        addition.apc_context,
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                    Some(addr) => IpHelper::IcmpSendEcho2Ex(
-                        handler,
-                        addition.event,
-                        addition.apc_routine,
-                        addition.apc_context,
-                        addr.to_bits(),
-                        des,
-                        request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of::<u128>() as _,
-                        request_options,
-                        buf.as_ptr() as *mut _,
-                        buf.len() as _,
-                        self.builder.timeout,
-                    ),
-                },
-            };
+                }
+            });
             let reply_time = std::time::Instant::now().duration_since(start_time);
             common::check_reply_count(reply_count, handler)?;
 
