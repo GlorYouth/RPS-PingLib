@@ -1,6 +1,6 @@
 use crate::base::builder::{PingV4Builder, PingV6Builder};
 use crate::base::error::{PingError, SharedError};
-use crate::base::utils::UnMut;
+use crate::base::utils::un_mut::UnMut;
 use crate::{PingV4Result, PingV6Result};
 use rand::Rng;
 use std::ptr::null_mut;
@@ -79,7 +79,7 @@ impl PingV4 {
                 Err(e) => return Err(WindowsError::IcmpCreateFileError(e.message()).into()),
             };
             let des = target.to_bits();
-            let request_data: u128 = rand::rng().random();
+            let request_data: u128 = rand::rng().random(); // if you change this type, please change size_of::<u128> in reply_count
             let start_time = std::time::Instant::now();
 
             let request_options = match &self.info {
@@ -98,7 +98,7 @@ impl PingV4 {
                         None,
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -112,7 +112,7 @@ impl PingV4 {
                         addr.to_bits(),
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -127,7 +127,7 @@ impl PingV4 {
                         addition.apc_context,
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -141,7 +141,7 @@ impl PingV4 {
                         addr.to_bits(),
                         des,
                         request_data.to_be_bytes().as_ptr() as *mut _,
-                        size_of_val(&request_data) as _,
+                        size_of::<u128>() as _,
                         request_options,
                         buf.as_ptr() as *mut _,
                         buf.len() as _,
@@ -279,7 +279,7 @@ impl PingV6 {
                         },
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of_val(&request_data) as _,
+                    size_of::<u128>() as _,
                     request_options,
                     buf.as_ptr() as *mut _,
                     buf.len() as _,
@@ -317,7 +317,7 @@ impl PingV6 {
                         },
                     },
                     request_data.to_be_bytes().as_ptr() as *mut _,
-                    size_of_val(&request_data) as _,
+                    size_of::<u128>() as _,
                     request_options,
                     buf.as_ptr() as *mut _,
                     buf.len() as _,
@@ -417,7 +417,7 @@ mod tests {
     fn test_ping_in_detail() {
         let ping = PingV4Builder {
             timeout: 200,
-            ttl: Some(100),
+            ttl: Some(5),
             bind_addr: None,
             window_addition: None,
         }

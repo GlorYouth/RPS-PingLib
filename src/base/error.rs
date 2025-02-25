@@ -22,7 +22,7 @@ impl std::fmt::Debug for PingError {
                     write!(f, "SharedError::Unreachable")
                 }
                 SharedError::BindError(str) => {
-                    write!(f, "SharedError::BindError({})", str)
+                    write!(f, "SharedError::BindError({:?})", str)
                 }
             },
             #[cfg(target_os = "windows")]
@@ -46,19 +46,65 @@ impl std::fmt::Debug for PingError {
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => match e {
                 LinuxError::SocketSetupFailed(str) => {
-                    write!(f, "PingError::LinuxError(SocketSetupFailed): {}", str)
+                    write!(
+                        f,
+                        "PingError::LinuxError(SocketSetupFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SetSockOptError(str) => {
-                    write!(f, "PingError::LinuxError(SetSockOptError): {}", str)
+                    write!(
+                        f,
+                        "PingError::LinuxError(SetSockOptError): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+
+                LinuxError::ResolveRecvFailed => {
+                    write!(f, "PingError::LinuxError(ResolveRecvFailed)")
+                }
+                LinuxError::ConnectFailed(str) => {
+                    write!(
+                        f,
+                        "PingError::LinuxError(ConnectFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::SendtoFailed(str) => {
-                    write!(f, "PingError::LinuxError(SendFailed): {}", str)
+                    write!(
+                        f,
+                        "PingError::LinuxError(SendtoFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+                LinuxError::SendFailed(str) => {
+                    write!(
+                        f,
+                        "PingError::LinuxError(SendFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+
+                LinuxError::SendMessageFailed(str) => {
+                    write!(
+                        f,
+                        "PingError::LinuxError(SendMessageFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::RecvFailed(str) => {
-                    write!(f, "PingError::LinuxError(RecvFailed): {}", str)
+                    write!(
+                        f,
+                        "PingError::LinuxError(RecvFailed): Errno({str}) {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
+
                 LinuxError::MissRespondAddr => {
                     write!(f, "PingError::LinuxError(MissRespondAddr)")
+                }
+                LinuxError::NullPtr => {
+                    write!(f, "PingError::LinuxError(NullPtr)")
                 }
             },
         }
@@ -76,7 +122,7 @@ impl std::fmt::Display for PingError {
                     write!(f, "ping unreachable")
                 }
                 SharedError::BindError(str) => {
-                    write!(f, "ping bind error: {}", str)
+                    write!(f, "ping bind error: {:?}", str)
                 }
             },
             #[cfg(target_os = "windows")]
@@ -100,21 +146,80 @@ impl std::fmt::Display for PingError {
             #[cfg(not(target_os = "windows"))]
             PingError::LinuxError(e) => match e {
                 LinuxError::SocketSetupFailed(str) => {
-                    write!(f, "failed to setup socket: {}", str)
+                    write!(f, "failed to setup socket: {:?}", Self::errno_to_str(*str))
                 }
                 LinuxError::SetSockOptError(str) => {
-                    write!(f, "failed to set socket option: {}", str)
+                    write!(
+                        f,
+                        "failed to set socket option: {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+
+                LinuxError::ConnectFailed(str) => {
+                    write!(
+                        f,
+                        "failed to connect socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+                LinuxError::SendFailed(str) => {
+                    write!(f, "failed to send message: {:?}", Self::errno_to_str(*str))
                 }
                 LinuxError::SendtoFailed(str) => {
-                    write!(f, "failed to send message to socket: {}", str)
+                    write!(f, "failed to send message to a socket: {:?}", Self::errno_to_str(*str))
+                }
+                LinuxError::SendMessageFailed(str) => {
+                    write!(
+                        f,
+                        "failed to send message to socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
                 }
                 LinuxError::RecvFailed(str) => {
-                    write!(f, "failed to receive message from socket: {}", str)
+                    write!(
+                        f,
+                        "failed to receive message from socket: {:?}",
+                        Self::errno_to_str(*str)
+                    )
+                }
+
+                LinuxError::ResolveRecvFailed => {
+                    write!(f, "failed to resolve recv message")
                 }
                 LinuxError::MissRespondAddr => {
                     write!(f, "query target address failed")
                 }
+                LinuxError::NullPtr => {
+                    write!(f, "query target null pointer")
+                }
             },
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl PingError {
+    #[inline]
+    pub fn get_errno() -> libc::c_int {
+        unsafe { *libc::__errno_location() }
+    }
+
+    pub fn errno_to_str(err: libc::c_int) -> Option<String> {
+        unsafe {
+            let mut ptr = libc::strerror(err) as *const u8;
+            let mut offset = 0;
+            let mut str = String::with_capacity(55);
+            while (*ptr) != 0 {
+                if offset > 55 || !(*ptr).is_ascii() {
+                    return None;
+                } else {
+                    str.push(*ptr as char);
+                    offset += 1;
+                    ptr = ptr.wrapping_add(1);
+                }
+            }
+            Some(str)
         }
     }
 }
@@ -122,7 +227,7 @@ impl std::fmt::Display for PingError {
 pub enum SharedError {
     Timeout,
     Unreachable,
-    BindError(String),
+    BindError(Option<String>),
 }
 
 impl From<SharedError> for PingError {

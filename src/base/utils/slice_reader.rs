@@ -102,6 +102,11 @@ impl<'a> SliceReader<'a> {
     }
 
     #[inline]
+    pub fn remainder(&mut self) -> &'a [u8] {
+        self.read_slice(self.len() - self.pos)
+    }
+
+    #[inline]
     pub fn from_slice(slice: &'a [u8]) -> Self {
         SliceReader { slice, pos: 0 }
     }
@@ -172,5 +177,6 @@ mod tests {
         assert_eq!(reader.pos(), 5);
         assert_eq!(reader.read_slice(4), &slice[5..9]);
         assert_eq!(reader.pos(), 9);
+        assert_eq!(reader.remainder(), &slice[9..]);
     }
 }
