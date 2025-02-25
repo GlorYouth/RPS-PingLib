@@ -35,7 +35,7 @@ impl PingV4 {
     fn get_reply(
         &self,
         target: std::net::Ipv4Addr,
-    ) -> Result<(std::time::Duration, std::net::Ipv4Addr), PingError> {
+    ) -> Result<libc::c_int, PingError> {
         let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if sock == -1 {
             return Err(LinuxError::SocketSetupFailed(PingError::get_errno()).into());
@@ -61,49 +61,112 @@ impl PingV4 {
             }
         }
 
-        {
-            let sock_addr = libc::sockaddr_in {
-                sin_family: libc::AF_INET as u16,
-                sin_port: 0,
-                sin_addr: libc::in_addr { s_addr: 0 },
-                sin_zero: Default::default(),
-            };
+        match self.builder.bind_addr {
+            None => {},
+            Some(addr) => {
+                let sock_addr = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as u16,
+                    sin_port: 0,
+                    sin_addr: libc::in_addr { s_addr: addr.to_bits() },
+                    sin_zero: Default::default(),
+                };
 
-            let err = unsafe {
-                libc::bind(
-                    sock,
-                    &sock_addr as *const _ as *const libc::sockaddr,
-                    size_of::<libc::sockaddr_in>() as libc::socklen_t,
-                )
-            };
-            if err == -1 {
-                return Err(SharedError::BindError(
-                    PingError::errno_to_str(PingError::get_errno()),
-                )
-                .into());
-            }
-        }
-
-        {
-            match self.builder.ttl {
-                None => {}
-                Some(ttl) => {
-                    let err = unsafe {
-                        libc::setsockopt(
-                            sock,
-                            libc::SOL_IP,
-                            libc::IP_TTL,
-                            &ttl as *const _ as *const libc::c_void,
-                            size_of::<u8>() as libc::socklen_t,
-                        )
-                    };
-                    if err == -1 {
-                        return Err(LinuxError::SetSockOptError(PingError::get_errno()).into());
-                    }
+                let err = unsafe {
+                    libc::bind(
+                        sock,
+                        &sock_addr as *const _ as *const libc::sockaddr,
+                        size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                    )
+                };
+                if err == -1 {
+                    return Err(SharedError::BindError(
+                        PingError::errno_to_str(PingError::get_errno()),
+                    )
+                        .into());
                 }
             }
         }
 
+        match self.builder.ttl {
+            None => Ok(sock),
+            Some(ttl) => {
+                let err = unsafe {
+                    libc::setsockopt(
+                        sock,
+                        libc::SOL_IP,
+                        libc::IP_TTL,
+                        &ttl as *const _ as *const libc::c_void,
+                        size_of::<u8>() as libc::socklen_t,
+                    )
+                };
+                if err == -1 {
+                    Err(LinuxError::SetSockOptError(PingError::get_errno()).into())
+                } else {
+                    Ok(sock)
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
+        let sock = self.get_reply(target)?;
+        {
+            let addr = libc::sockaddr_in {
+                sin_family: libc::AF_INET as u16,
+                sin_port: 0,
+                sin_addr: unsafe { std::mem::transmute(target) },
+                sin_zero: Default::default(),
+            };
+            let err = unsafe {
+                libc::connect(
+                    sock,
+                    &addr as *const _ as *const libc::sockaddr,
+                    size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::ConnectFailed(PingError::get_errno()).into());
+            }
+        }
+        let sent = IcmpDataForPing::new_ping_v4();
+        {
+            let err = unsafe {
+                libc::send(
+                    sock,
+                    sent.get_inner().as_ptr() as *const _,
+                    IcmpDataForPing::DATA_SIZE,
+                    0,
+                )
+            };
+            if err == -1 {
+                return Err(LinuxError::SendFailed(PingError::get_errno()).into());
+            }
+        }
+        let start_time = std::time::Instant::now();
+
+        let mut buff = [0_u8; IcmpDataForPing::DATA_SIZE];
+        {
+            let len = unsafe { libc::recv(sock, buff.as_mut_ptr() as *mut _, IcmpDataForPing::DATA_SIZE, 0) };
+            let duration = std::time::Instant::now().duration_since(start_time);
+            if len == -1 {
+                return Err(LinuxError::RecvFailed(PingError::get_errno()).into());
+            }
+            let mut reader = SliceReader::from_slice(buff.as_ref());
+            match Ipv4Header::from_reader(&mut reader, len as u16).and_then(|header| {
+                let format = IcmpFormat::from_header_v4(&header)?;
+                format.check_is_correspond_v4(&sent)?;
+                Some(())
+            }) {
+                Some(_) => Ok(duration),
+                None => Err(LinuxError::ResolveRecvFailed.into()),
+            }
+        }
+    }
+
+    #[inline]
+    pub fn ping_in_detail(&self, target: std::net::Ipv4Addr) -> Result<PingV4Result, PingError> {
+        let sock = self.get_reply(target)?;
         let sent = IcmpDataForPing::new_ping_v4();
         {
             let addr = libc::sockaddr_in {
@@ -141,24 +204,13 @@ impl PingV4 {
                 format.check_is_correspond_v4(&sent)?;
                 Some(header)
             }) {
-                Some(header) => Ok((duration, header.get_source_address())),
+                Some(header) => Ok(PingV4Result {
+                    ip: header.get_source_address(),
+                    duration,
+                }),
                 None => Err(LinuxError::ResolveRecvFailed.into()),
             }
         }
-    }
-
-    #[inline]
-    pub fn ping(&self, target: std::net::Ipv4Addr) -> Result<std::time::Duration, PingError> {
-        Ok(self.get_reply(target)?.0)
-    }
-
-    #[inline]
-    pub fn ping_in_detail(&self, target: std::net::Ipv4Addr) -> Result<PingV4Result, PingError> {
-        let res = self.get_reply(target)?;
-        Ok(PingV4Result {
-            ip: res.1,
-            duration: res.0,
-        })
     }
 }
 
