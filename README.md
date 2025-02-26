@@ -3,17 +3,23 @@
 ## Intro
 RPS-PingLib is a rust ping lib which support windows and linux and designed for RPS-DNS project.
 
-It is directly implemented using windows.rs and libc.rs.
+It is directly implemented using [windows](https://crates.io/crates/windows) and [libc](https://crates.io/crates/libc).
 
 ## Usage
+### OS Requirements
+In Linux, you should add cap_net_raw privilege to your program, use:
+```shell
+setcap 'cap_net_raw' path/to/file
+```
+In Windows, it doesn't require administrator privilege.  
+### Example
 Cargo.toml:
 ```
 [dependencies]
 rps_ping_lib = { git = "https://github.com/GlorYouth/RPS-PingLib" }
 ```
 
-
-example.rs:
+func:
 ```rust
 fn main() {
     let ping = rps_ping_lib::PingV4Builder::new(1000).build();
