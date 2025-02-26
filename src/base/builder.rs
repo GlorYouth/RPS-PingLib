@@ -35,27 +35,6 @@ impl PingV4Builder {
     pub fn build(self) -> PingV4 {
         self.into()
     }
-
-    #[inline]
-    pub fn set_timeout(&mut self, timeout: u32) {
-        self.timeout = timeout;
-    }
-
-    #[inline]
-    pub fn set_ttl(&mut self, ttl: u8) {
-        self.ttl = Some(ttl);
-    }
-
-    #[inline]
-    pub fn set_bind_addr(&mut self, bind_addr: Option<std::net::Ipv4Addr>) {
-        self.bind_addr = bind_addr;
-    }
-
-    #[inline]
-    #[cfg(target_os = "windows")]
-    pub fn set_window_addition(&mut self, window_addition: WindowAddition) {
-        self.window_addition = Some(window_addition);
-    }
 }
 
 pub struct PingV6Builder {
@@ -94,32 +73,6 @@ impl PingV6Builder {
 
     pub fn build(self) -> PingV6 {
         self.into()
-    }
-
-    #[inline]
-    pub fn set_timeout(&mut self, timeout: u32) {
-        self.timeout = timeout;
-    }
-
-    #[inline]
-    pub fn set_ttl(&mut self, ttl: u8) {
-        self.ttl = Some(ttl);
-    }
-
-    #[inline]
-    pub fn set_bind_addr(&mut self, bind_addr: Option<std::net::Ipv6Addr>) {
-        self.bind_addr = bind_addr;
-    }
-
-    #[inline]
-    pub fn set_scope_id_option(&mut self, scope_id_option: Option<u32>) {
-        self.scope_id_option = scope_id_option;
-    }
-
-    #[inline]
-    #[cfg(target_os = "windows")]
-    pub fn set_window_addition(&mut self, window_addition: WindowAddition) {
-        self.window_addition = Some(window_addition);
     }
 }
 
