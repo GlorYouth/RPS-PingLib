@@ -1,5 +1,4 @@
-use crate::base::protocol::Ipv4Header;
-use crate::base::utils::SliceReader;
+use crate::base::protocol::{Ipv4Header, Ipv6Header};
 use rand::Rng;
 
 pub struct IcmpDataForPing {
@@ -71,44 +70,26 @@ impl IcmpDataForPing {
     }
 
     #[inline]
-    pub fn into_inner(self) -> [u8; IcmpDataForPing::DATA_SIZE] {
-        self.data
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        self.data.as_ref()
+    pub fn get_inner_mut(&mut self) -> &mut [u8; IcmpDataForPing::DATA_SIZE] {
+        &mut self.data
     }
 }
 
 pub struct IcmpFormat<'a> {
     icmp_type: u8,
-    code: u8,
+    // code: u8,
     checksum: u16,
     other_data: &'a [u8],
 }
 
 impl<'a> IcmpFormat<'a> {
-    pub fn from_reader(reader: &mut SliceReader<'a>, total_len: u8) -> Option<IcmpFormat<'a>> {
-        if reader.pos() - reader.len() < total_len as usize {
-            None
-        } else {
-            Some(IcmpFormat {
-                icmp_type: reader.read_u8(),
-                code: reader.read_u8(),
-                checksum: reader.read_u16(),
-                other_data: reader.read_slice(total_len as usize - 4),
-            })
-        }
-    }
-
-    pub fn from_slice<'b: 'a>(slice: &'b [u8]) -> Option<IcmpFormat<'a>> {
+    pub fn from_slice(slice: &[u8]) -> Option<IcmpFormat<'_>> {
         if slice.len() < 4 {
             None
         } else {
             Some(IcmpFormat {
                 icmp_type: slice[0],
-                code: slice[1],
+                // code: slice[1],
                 checksum: u16::from_be_bytes(slice[2..4].try_into().unwrap()),
                 other_data: &slice[4..],
             })
@@ -120,17 +101,17 @@ impl<'a> IcmpFormat<'a> {
         IcmpFormat::from_slice(header.get_payload())
     }
 
-    #[inline]
-    pub fn icmp_type(&self) -> u8 {
-        self.icmp_type
-    }
+    // #[inline]
+    // pub fn icmp_type(&self) -> u8 {
+    //     self.icmp_type
+    // }
 
     pub fn check_is_correspond_v4(&self, data: &IcmpDataForPing) -> Option<()> {
         match (data.icmp_type(), self.icmp_type) {
             (8, 0) => self.other_data[2..].eq(&data.data[6..]).then_some(()),
             (8, 11) => {
                 // Time to live exceeded
-                Ipv4Header::from_slice_uncheck(&self.other_data[4..]) // 使用uncheck的原因是部分Time to live exceeded响应并未传递ICMP请求的Data部分非序列号和识别部分
+                Ipv4Header::from_slice(&self.other_data[4..]) // 使用uncheck的原因是部分Time to live exceeded响应并未传递ICMP请求的Data部分非序列号和识别部分
                     .and_then(|header| IcmpFormat::from_header_v4(&header))
                     .and_then(|icmp| {
                         // 直接比较checksum,因为有部分响应实现并未传递其余部分
@@ -146,9 +127,9 @@ impl<'a> IcmpFormat<'a> {
     pub fn check_is_correspond_v6(&self, data: &IcmpDataForPing) -> Option<()> {
         match (data.icmp_type(), self.icmp_type) {
             (128, 129) => self.other_data[2..].eq(&data.data[6..]).then_some(()),
-            (128, 130) => {
-                todo!()
-            }
+            (128, 3) => Ipv6Header::from_slice(&self.other_data[4..])
+                .and_then(|header| IcmpFormat::from_slice(header.get_payload()?))
+                .and_then(|format| format.other_data[2..].eq(&data.data[6..]).then_some(())),
             _ => None,
         }
     }
